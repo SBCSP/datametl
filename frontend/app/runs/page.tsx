@@ -39,7 +39,7 @@ const STATUS_VARIANT: Record<string, "secondary" | "warning" | "success" | "dest
   complete: "success",
 };
 
-const ALL: "all" = "all";
+const ALL = "all" as const;
 const TYPES: (ActivityType | typeof ALL)[] = [ALL, "introspection", "comparison", "migration", "verification"];
 
 export default function RunsPage() {

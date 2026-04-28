@@ -1,6 +1,6 @@
 "use client";
 
-import { use } from "react";
+import { Suspense, use } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -24,6 +24,14 @@ const TBL: Record<VerificationTableStatus, "secondary" | "warning" | "success" |
 };
 
 export default function VerificationRunPage({ params }: { params: Promise<{ id: string }> }) {
+  return (
+    <Suspense fallback={<p className="text-sm text-muted-foreground">Loading…</p>}>
+      <VerificationRunBody params={params} />
+    </Suspense>
+  );
+}
+
+function VerificationRunBody({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const search = useSearchParams();
   const job = useJob(search.get("job"));

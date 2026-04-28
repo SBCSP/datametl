@@ -1,6 +1,6 @@
 "use client";
 
-import { use, useEffect, useState } from "react";
+import { Suspense, use, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -16,6 +16,14 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { PageHeader } from "@/components/page-header";
 
 export default function SchemaPage({ params }: { params: Promise<{ connectionId: string }> }) {
+  return (
+    <Suspense fallback={<p className="text-sm text-muted-foreground">Loading…</p>}>
+      <SchemaPageBody params={params} />
+    </Suspense>
+  );
+}
+
+function SchemaPageBody({ params }: { params: Promise<{ connectionId: string }> }) {
   const { connectionId } = use(params);
   const search = useSearchParams();
   const qc = useQueryClient();

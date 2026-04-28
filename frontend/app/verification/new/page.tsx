@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useMutation, useQuery } from "@tanstack/react-query";
@@ -25,6 +25,14 @@ const LEVELS: { value: VerificationLevel; label: string }[] = [
 ];
 
 export default function NewVerificationPage() {
+  return (
+    <Suspense fallback={<p className="text-sm text-muted-foreground">Loading…</p>}>
+      <NewVerificationPageBody />
+    </Suspense>
+  );
+}
+
+function NewVerificationPageBody() {
   const router = useRouter();
   const search = useSearchParams();
   const comparisonId = search.get("comparison");

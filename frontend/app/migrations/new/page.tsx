@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useMutation, useQuery } from "@tanstack/react-query";
@@ -16,7 +16,6 @@ import type {
   VerificationLevel,
 } from "@/lib/types";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -31,7 +30,18 @@ const VERIFICATION_LEVELS: { value: VerificationLevel; label: string }[] = [
   { value: "count_sample_and_full_hash", label: "Count + sample + full hash" },
 ];
 
+// Wrapping the body in <Suspense> lets Next.js prerender a placeholder during build —
+// useSearchParams() can only run client-side, so the inner body hydrates with the real
+// query string. Without this, `next build` errors out with a CSR-bailout warning.
 export default function NewMigrationPage() {
+  return (
+    <Suspense fallback={<p className="text-sm text-muted-foreground">Loading…</p>}>
+      <NewMigrationPageBody />
+    </Suspense>
+  );
+}
+
+function NewMigrationPageBody() {
   const router = useRouter();
   const search = useSearchParams();
   const comparisonId = search.get("comparison");
@@ -389,19 +399,6 @@ function PreflightPanel({ result }: { result: MigrationPreflightResponse }) {
         </Alert>
       )}
     </div>
-  );
-}
-
-function FindingsList({ findings }: { findings: MigrationFinding[] }) {
-  return (
-    <ul className="list-disc pl-4 space-y-1">
-      {findings.map((f, i) => (
-        <li key={i}>
-          <span>{f.message}</span>{" "}
-          <code className="text-[10px] text-muted-foreground">{f.code}</code>
-        </li>
-      ))}
-    </ul>
   );
 }
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { use } from "react";
+import { Suspense, use } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -24,6 +24,14 @@ const TABLE_STATUS: Record<TableRunStatus, "secondary" | "warning" | "success" |
 };
 
 export default function MigrationRunPage({ params }: { params: Promise<{ id: string }> }) {
+  return (
+    <Suspense fallback={<p className="text-sm text-muted-foreground">Loading…</p>}>
+      <MigrationRunBody params={params} />
+    </Suspense>
+  );
+}
+
+function MigrationRunBody({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const search = useSearchParams();
   const jobId = search.get("job");

@@ -1,7 +1,7 @@
 COMPOSE := docker compose -f infra/docker-compose.yml --env-file .env
 COMPOSE_SAMPLES := $(COMPOSE) -f infra/docker-compose.samples.yml --profile samples
 
-.PHONY: help up up-samples urls down logs ps build rebuild migrate revision shell-backend shell-db psql redis-cli test lint typecheck fmt clean key release deploy-up deploy-down deploy-build-local
+.PHONY: help up up-samples urls down logs ps build rebuild migrate revision shell-backend shell-db psql redis-cli test lint typecheck fmt clean key release deploy-up deploy-pull deploy-down deploy-build-local
 
 help:
 	@echo "DataMETL — common commands"
@@ -24,10 +24,11 @@ help:
 	@echo "  make fmt            Run ruff format on backend"
 	@echo ""
 	@echo "Release / deploy"
-	@echo "  make release v=v0.X.Y   Tag + push, triggering the release workflow on GitHub"
-	@echo "  make deploy-up          Run the deploy compose locally against published GHCR images"
-	@echo "  make deploy-down        Stop the deploy stack"
-	@echo "  make deploy-build-local Build the prod images locally (skips GHCR) for smoke tests"
+	@echo "  make release v=v0.X.Y    Tag + push, triggering the release workflow on GitHub"
+	@echo "  make deploy-build-local  Build prod images locally (tagged :dev) for smoke tests"
+	@echo "  make deploy-up           Start the deploy compose (auto-generates .env.deploy)"
+	@echo "  make deploy-pull         Force-pull latest published images + restart"
+	@echo "  make deploy-down         Stop the deploy stack"
 
 key:
 	@python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
@@ -119,16 +120,38 @@ endif
 	@echo "release assets. Watch progress at:"
 	@echo "  https://github.com/sbcsp/datametl/actions"
 
-# Run the deploy compose locally (against the published GHCR images) — useful for testing
-# what end users get after running install.sh.
-deploy-up:
-	docker compose -f infra/docker-compose.deploy.yml --env-file .env.deploy up -d --pull always
+# Run the deploy compose locally — for testing what end users will get from install.sh.
+# Auto-generates .env.deploy on first run (with a fresh Fernet key) so you don't get
+# stuck on "ENCRYPTION_KEY not valid" the first time you run.
+#
+# We deliberately do NOT pass --pull always: when smoke-testing locally with :dev images
+# built via `make deploy-build-local`, those images aren't on the registry yet and a
+# forced pull would fail. For pulling published versions, use `make deploy-pull`.
+deploy-up: .env.deploy
+	docker compose -f infra/docker-compose.deploy.yml --env-file .env.deploy up -d
+
+# Force-pull the newest published images from GHCR + restart. Useful after a release.
+deploy-pull: .env.deploy
+	docker compose -f infra/docker-compose.deploy.yml --env-file .env.deploy pull
+	docker compose -f infra/docker-compose.deploy.yml --env-file .env.deploy up -d
 
 deploy-down:
 	docker compose -f infra/docker-compose.deploy.yml --env-file .env.deploy down
 
-# Build the prod images locally with the current source tree (skips GHCR). Useful for
-# smoke-testing the multi-stage Dockerfile changes before tagging a release.
+# First-run helper: copy the example and inject a freshly-generated Fernet key. Same
+# operation install.sh does for end users.
+.env.deploy: .env.deploy.example
+	@cp .env.deploy.example .env.deploy
+	@KEY=$$(openssl rand -base64 32 | tr '+/' '-_'); \
+	  if [ "$$(uname)" = "Darwin" ]; then \
+	    sed -i '' "s|^ENCRYPTION_KEY=.*|ENCRYPTION_KEY=$$KEY|" .env.deploy; \
+	  else \
+	    sed -i "s|^ENCRYPTION_KEY=.*|ENCRYPTION_KEY=$$KEY|" .env.deploy; \
+	  fi
+	@echo "Created .env.deploy with a fresh ENCRYPTION_KEY."
+
+# Build the prod images locally from the current source tree (skips GHCR). Tags them as
+# :dev so deploy-up picks them up via DATAMETL_VERSION=dev.
 deploy-build-local:
 	docker build -t ghcr.io/sbcsp/datametl-backend:dev backend/
 	docker build --target prod -t ghcr.io/sbcsp/datametl-frontend:dev frontend/

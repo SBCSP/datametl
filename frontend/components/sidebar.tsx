@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useQuery } from "@tanstack/react-query";
 import {
   Activity,
   ArrowRightLeft,
@@ -13,6 +14,7 @@ import {
   ShieldCheck,
   Workflow,
 } from "lucide-react";
+import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -54,6 +56,14 @@ const NAV: { section: string; items: NavItem[] }[] = [
 
 export function Sidebar() {
   const pathname = usePathname();
+  // Shares the ["settings"] query key with the Settings page — TanStack Query dedupes,
+  // so this is one HTTP request total no matter how many subscribers there are.
+  const { data: settings } = useQuery({
+    queryKey: ["settings"],
+    queryFn: api.getSettings,
+    staleTime: 60_000,
+    retry: false,
+  });
 
   return (
     <aside className="hidden md:flex md:w-60 md:flex-col md:fixed md:inset-y-0 md:z-40 border-r bg-card">
@@ -63,7 +73,9 @@ export function Sidebar() {
         </div>
         <div className="flex flex-col leading-tight">
           <span className="text-sm font-semibold tracking-tight">DataMETL</span>
-          <span className="text-[10px] text-muted-foreground">v0.1 · Phase 1</span>
+          <span className="text-[10px] text-muted-foreground">
+            {settings ? `v${settings.version}` : "—"}
+          </span>
         </div>
       </div>
 
