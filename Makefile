@@ -112,7 +112,26 @@ endif
 	@if [ "$$(echo $(v) | cut -c1)" != "v" ]; then \
 		echo "Tag must start with 'v', e.g. v0.2.1"; exit 1; \
 	fi
-	@git diff --quiet || { echo "Working tree has uncommitted changes."; exit 1; }
+	@# Reject if there are uncommitted OR untracked changes. `git status --porcelain`
+	@# returns one line per file in either state — empty output means clean tree. (The
+	@# previous `git diff --quiet` only caught modified-tracked files, which let an
+	@# untracked file slip through and cause a CI build failure.)
+	@if [ -n "$$(git status --porcelain)" ]; then \
+		echo "Working tree has uncommitted or untracked changes:"; \
+		git status --short; \
+		echo ""; \
+		echo "Commit (or .gitignore) everything before releasing."; \
+		exit 1; \
+	fi
+	@# Make sure backend/app/api/settings.py::_VERSION matches the tag we're cutting.
+	@TAG_VERSION="$$(echo $(v) | sed 's/^v//')"; \
+	  CODE_VERSION="$$(grep '^_VERSION' backend/app/api/settings.py | sed -E 's/^_VERSION[[:space:]]*=[[:space:]]*"([^"]+)".*/\1/')"; \
+	  if [ "$$TAG_VERSION" != "$$CODE_VERSION" ]; then \
+	    echo "Version mismatch: backend/app/api/settings.py has _VERSION = \"$$CODE_VERSION\""; \
+	    echo "but you're tagging $(v) (== $$TAG_VERSION)."; \
+	    echo "Bump _VERSION first, commit, then re-run."; \
+	    exit 1; \
+	  fi
 	git tag -a $(v) -m "Release $(v)"
 	git push origin $(v)
 	@echo ""

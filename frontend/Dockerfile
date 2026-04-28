@@ -22,9 +22,12 @@ FROM deps AS builder
 COPY . .
 ENV NEXT_TELEMETRY_DISABLED=1
 # NEXT_PUBLIC_API_BASE_URL is intentionally empty for the published image — the frontend
-# uses Next.js rewrites (server-side) to proxy /api/* to the backend container, so the
-# browser always fetches same-origin and never needs to know the backend's URL.
+# uses middleware.ts (runtime) to proxy /api/* to the backend container, so the browser
+# always fetches same-origin and never needs to know the backend's URL.
 ENV NEXT_PUBLIC_API_BASE_URL=
+# Ensure /app/public exists so the COPY in the prod stage below never fails, even if
+# the source repo doesn't have a public/ directory. (Next.js doesn't require one.)
+RUN mkdir -p public
 RUN npm run build
 
 
