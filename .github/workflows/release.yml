@@ -1,0 +1,126 @@
+name: Release
+
+# Triggered on tag push (v*). Builds multi-arch (amd64 + arm64) images for backend and
+# frontend, pushes them to ghcr.io/sbcsp/*, then attaches the deploy compose + install
+# script to the GitHub release as downloadable assets.
+#
+# To cut a release:
+#   git tag v0.2.1 && git push origin v0.2.1
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to (re)release (e.g. v0.2.1)"
+        required: true
+
+permissions:
+  contents: write   # create GitHub release + attach assets
+  packages: write   # push to ghcr.io
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAMESPACE: sbcsp
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ inputs.tag }}"
+          else
+            VERSION="${GITHUB_REF#refs/tags/}"
+          fi
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Resolved version: ${VERSION}"
+
+      - name: Set up QEMU (arm64 emulation)
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # --- Backend image ---
+      - name: Backend metadata
+        id: meta_backend
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/datametl-backend
+          tags: |
+            type=raw,value=${{ steps.version.outputs.version }}
+            type=raw,value=latest
+
+      - name: Build + push backend
+        uses: docker/build-push-action@v6
+        with:
+          context: ./backend
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: ${{ steps.meta_backend.outputs.tags }}
+          labels: ${{ steps.meta_backend.outputs.labels }}
+          cache-from: type=gha,scope=backend
+          cache-to: type=gha,mode=max,scope=backend
+
+      # --- Frontend image (production target) ---
+      - name: Frontend metadata
+        id: meta_frontend
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/datametl-frontend
+          tags: |
+            type=raw,value=${{ steps.version.outputs.version }}
+            type=raw,value=latest
+
+      - name: Build + push frontend
+        uses: docker/build-push-action@v6
+        with:
+          context: ./frontend
+          push: true
+          platforms: linux/amd64,linux/arm64
+          target: prod
+          tags: ${{ steps.meta_frontend.outputs.tags }}
+          labels: ${{ steps.meta_frontend.outputs.labels }}
+          cache-from: type=gha,scope=frontend
+          cache-to: type=gha,mode=max,scope=frontend
+
+      # --- Release artifacts ---
+      # End users only need: docker-compose.yml, .env.example, install.sh.
+      # We rename the deploy compose to docker-compose.yml for ergonomics — that's the
+      # filename `docker compose` looks for by default in the install dir.
+      - name: Stage release artifacts
+        run: |
+          mkdir -p _release
+          cp infra/docker-compose.deploy.yml _release/docker-compose.yml
+          cp .env.deploy.example _release/.env.example
+          cp scripts/install.sh _release/install.sh
+          # Pin the release version into the compose so `docker compose pull` gets the
+          # exact images this release published, not whatever happens to be `:latest`.
+          sed -i "s|\${DATAMETL_VERSION:-latest}|${{ steps.version.outputs.version }}|g" _release/docker-compose.yml
+          ls -la _release/
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.version }}
+          name: ${{ steps.version.outputs.version }}
+          generate_release_notes: true
+          files: |
+            _release/docker-compose.yml
+            _release/.env.example
+            _release/install.sh

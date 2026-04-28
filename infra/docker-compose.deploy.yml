@@ -1,0 +1,103 @@
+name: datametl
+
+# Production / "I just want to use this" compose file.
+#
+# Differences from infra/docker-compose.yml (the dev one):
+#   * Pulls pre-built images from ghcr.io/sbcsp/* — no source tree needed
+#   * Frontend uses Next.js rewrites to proxy /api/* to the backend container, so the
+#     browser only ever talks to one origin and you only expose ONE host port (frontend).
+#     No CORS, no port-baking in the JS bundle, no surprises.
+#   * Backend port is NOT mapped to the host. If you want direct API access, uncomment
+#     the `ports:` block under `backend:`.
+#   * No bind mounts, no live-reload — these images are immutable releases.
+
+services:
+  app-postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${APP_DB_USER:-datametl}
+      POSTGRES_PASSWORD: ${APP_DB_PASSWORD:-datametl}
+      POSTGRES_DB: ${APP_DB_NAME:-datametl}
+    volumes:
+      - app-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${APP_DB_USER:-datametl} -d ${APP_DB_NAME:-datametl}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  migrate:
+    # One-shot job: run Alembic upgrade against the metadata DB before backend/worker start.
+    image: ghcr.io/sbcsp/datametl-backend:${DATAMETL_VERSION:-latest}
+    depends_on:
+      app-postgres: { condition: service_healthy }
+    environment:
+      DATABASE_URL: postgresql+psycopg://${APP_DB_USER:-datametl}:${APP_DB_PASSWORD:-datametl}@app-postgres:5432/${APP_DB_NAME:-datametl}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+    command: ["alembic", "upgrade", "head"]
+    restart: "no"
+
+  backend:
+    image: ghcr.io/sbcsp/datametl-backend:${DATAMETL_VERSION:-latest}
+    restart: unless-stopped
+    depends_on:
+      app-postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      migrate: { condition: service_completed_successfully }
+    environment:
+      DATABASE_URL: postgresql+psycopg://${APP_DB_USER:-datametl}:${APP_DB_PASSWORD:-datametl}@app-postgres:5432/${APP_DB_NAME:-datametl}
+      REDIS_URL: redis://redis:6379/0
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      # The frontend proxies /api requests on the user's behalf, so the browser is always
+      # same-origin. CORS is configured permissively for the localhost origins anyway, in
+      # case someone wants direct API access.
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000,http://localhost}
+    # No --reload in production. The image's default CMD has it (for dev convenience);
+    # override here.
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    # Uncomment to expose the API directly to the host (default is internal-only):
+    # ports:
+    #   - "${BACKEND_PORT:-8000}:8000"
+
+  worker:
+    image: ghcr.io/sbcsp/datametl-backend:${DATAMETL_VERSION:-latest}
+    restart: unless-stopped
+    depends_on:
+      app-postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      migrate: { condition: service_completed_successfully }
+    environment:
+      DATABASE_URL: postgresql+psycopg://${APP_DB_USER:-datametl}:${APP_DB_PASSWORD:-datametl}@app-postgres:5432/${APP_DB_NAME:-datametl}
+      REDIS_URL: redis://redis:6379/0
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    command: ["arq", "app.jobs.worker.WorkerSettings"]
+
+  frontend:
+    image: ghcr.io/sbcsp/datametl-frontend:${DATAMETL_VERSION:-latest}
+    restart: unless-stopped
+    depends_on:
+      - backend
+    environment:
+      # Server-side proxy target. The browser never sees this — it just hits same-origin
+      # /api/* and Next.js rewrites send the request to the backend container.
+      NEXT_INTERNAL_API_BASE_URL: http://backend:8000
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
+
+volumes:
+  app-postgres-data:
+  redis-data:

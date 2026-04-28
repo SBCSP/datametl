@@ -1,0 +1,44 @@
+name: datametl
+
+services:
+  sample-source:
+    image: postgres:16
+    profiles: ["samples"]
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${SAMPLE_SOURCE_PASSWORD:-samplesource}
+      POSTGRES_DB: source
+    ports:
+      - "5500:5432"
+    volumes:
+      - sample-source-data:/var/lib/postgresql/data
+      - ./seed/supabase-source.sql:/docker-entrypoint-initdb.d/00-supabase-source.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d source"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  sample-dest:
+    image: postgres:16
+    profiles: ["samples"]
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${SAMPLE_DEST_PASSWORD:-sampledest}
+      POSTGRES_DB: dest
+    ports:
+      - "5501:5432"
+    volumes:
+      - sample-dest-data:/var/lib/postgresql/data
+      - ./seed/vanilla-dest.sql:/docker-entrypoint-initdb.d/00-vanilla-dest.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d dest"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  sample-source-data:
+  sample-dest-data:
