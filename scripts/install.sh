@@ -42,6 +42,17 @@ curl -fsSL "${BASE}/docker-compose.yml" -o docker-compose.yml \
 curl -fsSL "${BASE}/.env.example" -o .env.example \
   || err "Could not fetch .env.example."
 
+# Older releases sed-pinned the image tags to a specific version. Newer releases ship
+# with the ${DATAMETL_VERSION:-latest} template intact. Normalize either way so that
+# DATAMETL_VERSION in the user's .env always controls which images get pulled.
+SED_INPLACE=(-i)
+if [ "$(uname)" = "Darwin" ]; then
+  SED_INPLACE=(-i '')
+fi
+sed "${SED_INPLACE[@]}" -E \
+  -e 's|(ghcr\.io/sbcsp/datametl-(backend|frontend)):[^[:space:]"$]+|\1:${DATAMETL_VERSION:-latest}|g' \
+  docker-compose.yml || true
+
 # --- Generate Fernet key ---
 # A Fernet key is 32 random bytes encoded as urlsafe base64. openssl produces standard
 # base64; tr '+/' '-_' converts it to urlsafe form. The padding stays valid.

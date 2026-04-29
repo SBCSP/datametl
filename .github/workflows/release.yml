@@ -103,15 +103,18 @@ jobs:
       # End users only need: docker-compose.yml, .env.example, install.sh.
       # We rename the deploy compose to docker-compose.yml for ergonomics — that's the
       # filename `docker compose` looks for by default in the install dir.
+      #
+      # The compose ships with `image: ghcr.io/.../datametl-...:${DATAMETL_VERSION:-latest}`
+      # intact (no longer sed-pinned to this release's tag). End users get `:latest` by
+      # default and can pin to a specific version via DATAMETL_VERSION in their .env.
+      # That keeps `docker compose pull && docker compose up -d` working as the upgrade
+      # path without users having to redownload the compose file.
       - name: Stage release artifacts
         run: |
           mkdir -p _release
           cp infra/docker-compose.deploy.yml _release/docker-compose.yml
           cp .env.deploy.example _release/.env.example
           cp scripts/install.sh _release/install.sh
-          # Pin the release version into the compose so `docker compose pull` gets the
-          # exact images this release published, not whatever happens to be `:latest`.
-          sed -i "s|\${DATAMETL_VERSION:-latest}|${{ steps.version.outputs.version }}|g" _release/docker-compose.yml
           ls -la _release/
 
       - name: Create GitHub release
