@@ -18,7 +18,7 @@ from app.jobs.worker import WorkerSettings
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
-_VERSION = "0.2.1"  # Bump alongside meaningful releases. Surfaced in About panel.
+_VERSION = "0.2.2"  # Bump alongside meaningful releases. Surfaced in About panel.
 
 
 def _redact_url(url: str) -> str:
