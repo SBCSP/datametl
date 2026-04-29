@@ -1,7 +1,8 @@
-# Env / secrets
+# Env / secrets — ignore real env files but keep the templates checked in.
 .env
 .env.*
 !.env.example
+!.env.deploy.example
 
 # Python
 __pycache__/
