@@ -37,3 +37,7 @@ next-env.d.ts
 
 # Docker
 .docker/
+
+# Local-only working assets (logos / screenshots not yet wired into the README).
+# Force-add (`git add -f images/foo.jpg`) when you're ready to commit one.
+images/

@@ -151,15 +151,17 @@ def get_run(run_id: uuid.UUID, db: Session = Depends(get_db)) -> MigrationRunRea
 @router.post("/runs/{run_id}/cancel", response_model=MigrationRunRead)
 def cancel_run(run_id: uuid.UUID, db: Session = Depends(get_db)) -> MigrationRunRead:
     """Best-effort cancellation. arq doesn't support mid-task cancel for sync work, so this
-    flips the run status to cancelled — the worker won't pick up further tables but a
-    currently-running TRUNCATE/COPY will finish."""
+    flips the run status to cancelled. The worker checks the run.status between tables and
+    bails when it sees `cancelled`. A currently-running TRUNCATE/COPY will finish on its own
+    and update its table row to succeeded/failed before the worker exits."""
     r = db.get(MigrationRun, run_id)
     if r is None:
         raise HTTPException(404, "Run not found")
     if r.status in (MigrationRunStatus.succeeded, MigrationRunStatus.failed, MigrationRunStatus.cancelled):
         return get_run(run_id, db)
     r.status = MigrationRunStatus.cancelled
-    # Mark any pending tables as skipped.
+    # Mark any pending tables as skipped immediately; the runner will also do this on its
+    # next iteration, but doing it here gives the UI a faster update.
     pending = (
         db.query(MigrationRunTable)
         .filter(MigrationRunTable.run_id == r.id, MigrationRunTable.status == TableRunStatus.pending)
@@ -168,5 +170,42 @@ def cancel_run(run_id: uuid.UUID, db: Session = Depends(get_db)) -> MigrationRun
     for t in pending:
         t.status = TableRunStatus.skipped
         t.error = "cancelled by user"
+    db.commit()
+    return get_run(run_id, db)
+
+
+@router.post("/runs/{run_id}/cleanup-stale", response_model=MigrationRunRead)
+def cleanup_stale_tables(run_id: uuid.UUID, db: Session = Depends(get_db)) -> MigrationRunRead:
+    """Mark any tables stuck in 'running' or 'pending' as failed when the parent run has
+    already terminated (succeeded / failed / cancelled). Useful when the worker died mid-run
+    and didn't get a chance to write final per-table status, or when a cancellation left
+    tables that were genuinely mid-COPY in a perpetual 'running' state in the UI."""
+    r = db.get(MigrationRun, run_id)
+    if r is None:
+        raise HTTPException(404, "Run not found")
+    if r.status not in (MigrationRunStatus.succeeded, MigrationRunStatus.failed, MigrationRunStatus.cancelled):
+        raise HTTPException(
+            400,
+            f"Run status is '{r.status.value}', not terminal — cancel first if you want "
+            "to clean up tables stuck in 'running'.",
+        )
+    stale = (
+        db.query(MigrationRunTable)
+        .filter(
+            MigrationRunTable.run_id == r.id,
+            MigrationRunTable.status.in_([TableRunStatus.running, TableRunStatus.pending]),
+        )
+        .all()
+    )
+    for t in stale:
+        t.status = TableRunStatus.failed
+        t.error = (
+            t.error
+            or "stale: run terminated while this table was still in '%s' state. "
+            "Re-run the migration to load this table." % t.status.value
+        )
+        if not t.finished_at:
+            from datetime import datetime, timezone
+            t.finished_at = datetime.now(tz=timezone.utc)
     db.commit()
     return get_run(run_id, db)

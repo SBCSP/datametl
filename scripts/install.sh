@@ -39,8 +39,14 @@ fi
 info "Downloading from ${BASE}"
 curl -fsSL "${BASE}/docker-compose.yml" -o docker-compose.yml \
   || err "Could not fetch docker-compose.yml. Is the release tag valid?"
-curl -fsSL "${BASE}/.env.example" -o .env.example \
-  || err "Could not fetch .env.example."
+# The release asset is `env.example` (no leading dot) because GitHub's release-download
+# redirect 404s on dotfile names. We write it locally as `.env.example` so the rest of
+# the script (cp to .env, sed to inject the key) is unchanged.
+if ! curl -fsSL "${BASE}/env.example" -o .env.example 2>/dev/null; then
+  # Fallback for old releases (pre-v0.2.4) that uploaded the asset as `.env.example`.
+  curl -fsSL "${BASE}/.env.example" -o .env.example \
+    || err "Could not fetch env.example."
+fi
 
 # Older releases sed-pinned the image tags to a specific version. Newer releases ship
 # with the ${DATAMETL_VERSION:-latest} template intact. Normalize either way so that

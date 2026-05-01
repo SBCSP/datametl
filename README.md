@@ -11,6 +11,7 @@ It runs on your laptop, never sends your database credentials anywhere, and lets
 5. **Migrate** the data via streaming binary `COPY` with per-table conflict modes.
 6. **Verify** parity with row counts + hash sampling + sequence checks (also runs as a standalone tool).
 
+![DataMETL](./images/DataMETL.jpg)
 ## Quick install (no git clone needed)
 
 If you just want to run DataMETL — not develop it — this is the path:

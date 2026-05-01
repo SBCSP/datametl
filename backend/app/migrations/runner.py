@@ -122,10 +122,40 @@ def execute_run(db: Session, run_id: uuid.UUID) -> dict:
     # FK deferral on destination — set on every new connection that comes out of the pool
     # for the duration of this run. The strategy and verification both use connections from
     # this engine, so they all inherit it (psycopg defaults to one connection per checkout).
+    #
+    # NOTE: `session_replication_role = replica` requires SUPERUSER on vanilla Postgres,
+    # or the `rds_replication` role on AWS RDS. If the user's role lacks the privilege the
+    # SET fails — we catch + log a warning instead of letting it crash the connection. When
+    # this happens, FK enforcement stays on, and we rely entirely on topo-sort + per-table
+    # transactions (commit parent, then load child). That works *as long as parent tables
+    # successfully load*; if a parent fails, FK errors cascade.
     @_event_listens_for(dst_engine, "connect")
     def _fk_defer(dbapi_conn, _connection_record):  # type: ignore[no-redef]
-        with dbapi_conn.cursor() as cur:
-            cur.execute("SET session_replication_role = replica")
+        # CRITICAL: commit after SET so it persists. Postgres documents that a SET
+        # issued inside a transaction is undone if that transaction is rolled back.
+        # psycopg defaults to autocommit=False, so without an explicit commit the SET
+        # lives in the implicit transaction — and the strategy rolls back as its first
+        # action when it claims a connection from the pool. That rollback was silently
+        # undoing this SET and re-enabling FK enforcement, producing exactly the
+        # `psycopg.errors.ForeignKeyViolation` cascade you'd get if this listener had
+        # never run at all.
+        try:
+            with dbapi_conn.cursor() as cur:
+                cur.execute("SET session_replication_role = replica")
+            dbapi_conn.commit()
+            log.debug("session_replication_role = replica set on new dst connection")
+        except Exception as e:  # noqa: BLE001
+            # Roll back any failed-statement state on the connection so subsequent SQL works.
+            try:
+                dbapi_conn.rollback()
+            except Exception:  # noqa: BLE001
+                pass
+            log.warning(
+                "Could not set session_replication_role = replica on destination "
+                "(usually means the user lacks rds_replication / SUPERUSER): %s. "
+                "FKs will be enforced during load — relying on topo sort.",
+                e,
+            )
 
     strategy = LogicalCopyStrategy()
     plan_tables = list(
@@ -139,7 +169,18 @@ def execute_run(db: Session, run_id: uuid.UUID) -> dict:
     # Sort tables by FK dependency to load parents before children.
     plan_tables = _topo_sort(plan_tables, src_engine)
 
+    cancelled = False
     for prt in plan_tables:
+        # Honor mid-run cancellation. The cancel endpoint sets run.status = cancelled and
+        # marks pending tables as skipped — but if we don't refresh + check here, the for
+        # loop happily picks them up and overwrites "skipped" with "running". Refresh the
+        # run row from the DB on each iteration so we see external state changes.
+        db.refresh(run)
+        if run.status == MigrationRunStatus.cancelled:
+            cancelled = True
+            log.info("run %s: cancelled by user; skipping remaining tables", run.id)
+            break
+
         try:
             _run_table(
                 db, run=run, prt=prt,
@@ -158,9 +199,29 @@ def execute_run(db: Session, run_id: uuid.UUID) -> dict:
             prt.finished_at = datetime.now(tz=timezone.utc)
             db.commit()
 
+    # If we bailed due to cancellation, mark any still-pending tables as skipped so the
+    # UI doesn't leave them in a "pending" limbo.
+    if cancelled:
+        still_pending = (
+            db.query(MigrationRunTable)
+            .filter(
+                MigrationRunTable.run_id == run.id,
+                MigrationRunTable.status == TableRunStatus.pending,
+            )
+            .all()
+        )
+        for t in still_pending:
+            t.status = TableRunStatus.skipped
+            t.error = t.error or "cancelled by user before run started"
+        db.commit()
+
     # Final status.
     run.finished_at = datetime.now(tz=timezone.utc)
-    if failed == 0:
+    if cancelled:
+        # Keep the cancelled status — don't overwrite with succeeded/failed even if some
+        # tables in this iteration succeeded.
+        pass
+    elif failed == 0:
         run.status = MigrationRunStatus.succeeded
     else:
         run.status = MigrationRunStatus.failed

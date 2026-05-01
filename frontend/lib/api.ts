@@ -114,6 +114,8 @@ export const api = {
   getMigrationRun: (id: string) => request<MigrationRun>(`/api/migrations/runs/${id}`),
   cancelMigrationRun: (id: string) =>
     request<MigrationRun>(`/api/migrations/runs/${id}/cancel`, { method: "POST" }),
+  cleanupStaleMigrationTables: (id: string) =>
+    request<MigrationRun>(`/api/migrations/runs/${id}/cleanup-stale`, { method: "POST" }),
 
   // Verifications
   createVerificationRun: (body: { comparison_id: string; options: VerificationOptionsPayload }) =>

@@ -113,7 +113,9 @@ jobs:
         run: |
           mkdir -p _release
           cp infra/docker-compose.deploy.yml _release/docker-compose.yml
-          cp .env.deploy.example _release/.env.example
+          # Rename without the leading dot — GitHub's `releases/latest/download/` redirect
+          # 404s on dotfile asset names. install.sh writes to `.env` regardless.
+          cp .env.deploy.example _release/env.example
           cp scripts/install.sh _release/install.sh
           ls -la _release/
 
@@ -125,5 +127,5 @@ jobs:
           generate_release_notes: true
           files: |
             _release/docker-compose.yml
-            _release/.env.example
+            _release/env.example
             _release/install.sh
