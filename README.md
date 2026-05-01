@@ -12,6 +12,7 @@ It runs on your laptop, never sends your database credentials anywhere, and lets
 6. **Verify** parity with row counts + hash sampling + sequence checks (also runs as a standalone tool).
 
 ![DataMETL](./images/DataMETL.jpg)
+
 ## Quick install (no git clone needed)
 
 If you just want to run DataMETL — not develop it — this is the path:
@@ -23,12 +24,20 @@ curl -fsSL https://github.com/sbcsp/datametl/releases/latest/download/install.sh
 The installer:
 - Verifies Docker is installed
 - Creates a `datametl/` directory in your CWD
-- Downloads the latest release's `docker-compose.yml` + `.env.example`
+- Downloads the latest release's `docker-compose.yml` + `env.example`
 - Generates a fresh Fernet encryption key into `.env`
+- Drops a small `Makefile` so day-to-day commands match the dev workflow
 - Pulls the multi-arch images from `ghcr.io/sbcsp/datametl-{backend,frontend}`
 - Brings the stack up
 
-Open <http://localhost:3000>. To stop: `cd datametl && docker compose down`. To update: `docker compose pull && docker compose up -d`.
+Open <http://localhost:3000>. From the install directory:
+
+```bash
+make down       # stop the stack (data persists in named volumes)
+make update     # pull latest images + restart
+make logs       # tail logs
+make help       # full target list
+```
 
 A specific version:
 ```bash
