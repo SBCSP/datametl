@@ -175,13 +175,21 @@ class LogicalCopyStrategy(Strategy):
             # --- Phase 2: load, transactional ---
             dst_psyco.autocommit = False
 
-            if ctx.conflict_mode == "truncate":
+            if ctx.conflict_mode == "truncate" and not ctx.skip_truncate:
                 # CASCADE handles the case where other tables have FKs pointing at this one
-                # (Postgres refuses TRUNCATE without CASCADE in that case). Since we're loading
-                # the full set of related tables anyway, cascading wipes are safe — the cascaded
-                # tables get reloaded too.
+                # (Postgres refuses TRUNCATE without CASCADE in that case).
+                #
+                # WARNING: this branch is the legacy fallback. The runner does an upfront
+                # bulk TRUNCATE of every truncate-mode table in one statement and sets
+                # `ctx.skip_truncate = True` for those — preferred because per-table
+                # TRUNCATE … CASCADE here will silently wipe already-loaded children
+                # whose parents the topo sort placed later than they should have been.
+                # We only land here if the runner's bulk TRUNCATE itself failed (e.g.
+                # permission), in which case the runner has already logged a warning.
                 with dst_psyco.cursor() as cur:
                     cur.execute(f"TRUNCATE TABLE {dst_qual} RESTART IDENTITY CASCADE")
+            elif ctx.conflict_mode == "truncate" and ctx.skip_truncate:
+                log.debug("copy: %s already truncated upfront — skipping per-table TRUNCATE", ctx.dest_table)
             elif ctx.conflict_mode == "abort":
                 with dst_psyco.cursor() as cur:
                     cur.execute(f"SELECT count(*) FROM {dst_qual}")

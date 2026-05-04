@@ -13,6 +13,11 @@ class TableMoveContext:
     dest_table: str           # qualified
     column_plan: ColumnPlan
     conflict_mode: str        # "truncate" | "append" | "abort"
+    skip_truncate: bool = False  # set by the runner when an upfront bulk TRUNCATE
+                                  # already cleared this table — prevents a per-table
+                                  # TRUNCATE … CASCADE from running and wiping any
+                                  # already-loaded children whose parents the topo
+                                  # sort placed later than they should have been.
 
 
 @dataclass

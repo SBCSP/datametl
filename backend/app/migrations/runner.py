@@ -169,6 +169,23 @@ def execute_run(db: Session, run_id: uuid.UUID) -> dict:
     # Sort tables by FK dependency to load parents before children.
     plan_tables = _topo_sort(plan_tables, src_engine)
 
+    # ── Upfront atomic TRUNCATE of every truncate-mode table in a single statement ──
+    #
+    # Why this exists: the per-table `TRUNCATE … CASCADE` pattern (still in the strategy
+    # for `append`/`abort` runs) silently destroys data when the topo sort puts a parent
+    # AFTER its child. Sequence:
+    #   1. child loaded → 1175 rows, verification ✓
+    #   2. parent's TRUNCATE CASCADE later in the run → wipes parent AND all FK-children
+    #      INCLUDING the child we just loaded. Run still reports succeeded.
+    # Postgres lets us TRUNCATE many tables in one statement without needing CASCADE
+    # *if all the FK-related tables are listed together* — exactly the situation here.
+    # So one upfront TRUNCATE handles the whole truncate set safely; the strategy then
+    # skips its own TRUNCATE via the `pre_truncated` set.
+    pre_truncated: set[str] = _bulk_truncate(
+        dst_engine,
+        [prt.dest_table for prt in plan_tables if prt.conflict_mode == ConflictMode.truncate],
+    )
+
     cancelled = False
     for prt in plan_tables:
         # Honor mid-run cancellation. The cancel endpoint sets run.status = cancelled and
@@ -186,6 +203,7 @@ def execute_run(db: Session, run_id: uuid.UUID) -> dict:
                 db, run=run, prt=prt,
                 src_engine=src_engine, dst_engine=dst_engine,
                 strategy=strategy,
+                pre_truncated=pre_truncated,
             )
             if prt.status == TableRunStatus.succeeded:
                 succeeded += 1
@@ -236,6 +254,54 @@ def execute_run(db: Session, run_id: uuid.UUID) -> dict:
     }
 
 
+def _bulk_truncate(dst_engine, dest_tables: list[str]) -> set[str]:
+    """Truncate every truncate-mode table in one atomic statement.
+
+    Returns the set of dest tables that were successfully truncated, so the strategy
+    can skip its own per-table TRUNCATE for these. If the bulk TRUNCATE fails (e.g.
+    permission denied, lock contention), we fall back to letting the strategy do its
+    own per-table TRUNCATE — this keeps existing behavior for users whose dest role
+    can't truncate-all-at-once but can do per-table ALTER + TRUNCATE.
+
+    Postgres semantics relied on:
+      * `TRUNCATE t1, t2, t3 RESTART IDENTITY` succeeds without CASCADE when all
+        FK-related tables are in the list — checks are satisfied collectively.
+      * One transaction, one statement → atomic. No window where some tables are
+        empty and others still hold stale data that would violate FKs at COPY time.
+    """
+    if not dest_tables:
+        return set()
+
+    # Quote each table name as schema.name. Dedup in case the plan has duplicates.
+    quoted = []
+    seen: set[str] = set()
+    for qn in dest_tables:
+        if qn in seen:
+            continue
+        seen.add(qn)
+        if "." in qn:
+            s, _, t = qn.partition(".")
+        else:
+            s, t = "public", qn
+        quoted.append(f'"{s}"."{t}"')
+
+    stmt = f"TRUNCATE TABLE {', '.join(quoted)} RESTART IDENTITY"
+    log.info("upfront truncate: %d table(s) — %s", len(quoted), stmt[:200])
+    try:
+        with dst_engine.begin() as conn:
+            conn.execute(text(stmt))
+        return seen
+    except Exception as e:  # noqa: BLE001
+        log.warning(
+            "upfront bulk TRUNCATE failed (%s). Falling back to per-table TRUNCATE in the "
+            "strategy. WARNING: per-table TRUNCATE CASCADE can wipe already-loaded data if "
+            "the FK topo sort missed an edge — investigate the cause of the bulk-truncate "
+            "failure rather than ignoring this warning.",
+            e,
+        )
+        return set()
+
+
 def _run_table(
     db: Session,
     *,
@@ -244,6 +310,7 @@ def _run_table(
     src_engine,
     dst_engine,
     strategy: LogicalCopyStrategy,
+    pre_truncated: set[str] = frozenset(),  # type: ignore[assignment]
 ) -> None:
     log.info("run %s: starting %s → %s", run.id, prt.source_table, prt.dest_table)
     prt.status = TableRunStatus.running
@@ -273,6 +340,7 @@ def _run_table(
         dest_table=prt.dest_table,
         column_plan=column_plan,
         conflict_mode=prt.conflict_mode.value if isinstance(prt.conflict_mode, ConflictMode) else prt.conflict_mode,
+        skip_truncate=prt.dest_table in pre_truncated,
     )
 
     t0 = time.monotonic()
