@@ -44,7 +44,7 @@ services:
       REDIS_URL: ${REDIS_URL}
       ENCRYPTION_KEY: ${ENCRYPTION_KEY}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
-      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3005}
     ports:
       - "8001:8000"
     volumes:
@@ -80,7 +80,7 @@ services:
     depends_on:
       - backend
     environment:
-      NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://localhost:8000}
+      NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://localhost:8001}
     ports:
       - "3005:3000"
     volumes:

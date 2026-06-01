@@ -43,9 +43,9 @@ up-samples:
 
 urls:
 	@printf '\n\033[1mDataMETL is up.\033[0m\n'
-	@printf '  \033[36mFrontend\033[0m         http://localhost:3000\n'
-	@printf '  \033[36mAPI (OpenAPI)\033[0m    http://localhost:8000/docs\n'
-	@printf '  \033[36mAPI health\033[0m       http://localhost:8000/health\n'
+	@printf '  \033[36mFrontend\033[0m         http://localhost:3005\n'
+	@printf '  \033[36mAPI (OpenAPI)\033[0m    http://localhost:8001/docs\n'
+	@printf '  \033[36mAPI health\033[0m       http://localhost:8001/health\n'
 	@printf '  \033[2mApp metadata DB\033[0m  postgres://datametl:datametl@localhost:5433/datametl\n'
 	@printf '  \033[2mRedis\033[0m            redis://localhost:6379\n'
 ifeq ($(SAMPLES),1)
