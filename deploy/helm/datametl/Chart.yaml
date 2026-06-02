@@ -1,0 +1,23 @@
+apiVersion: v2
+name: datametl
+description: >-
+  DataMETL — local-first data migration tool (FastAPI + arq worker + Next.js),
+  fronted by oauth2-proxy for Keycloak/OIDC SSO. Pluggable exposure (NodePort or Ingress).
+type: application
+
+# Chart version is bumped on chart changes. appVersion tracks the container image tag the
+# chart defaults to (see values.yaml image tags, which fall back to appVersion).
+version: 0.1.0
+appVersion: "latest"
+
+home: https://github.com/sbcsp/datametl
+sources:
+  - https://github.com/sbcsp/datametl
+maintainers:
+  - name: sbcsp
+keywords:
+  - postgres
+  - migration
+  - etl
+  - oauth2-proxy
+  - keycloak

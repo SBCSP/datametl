@@ -1,0 +1,31 @@
+# The single entry point. External nginx (NodePort) or an Ingress targets this Service.
+# It routes to oauth2-proxy when auth is enabled, otherwise straight to the frontend.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "datametl.fullname" . }}-proxy
+  labels:
+    {{- include "datametl.labels" . | nindent 4 }}
+    app.kubernetes.io/component: entry
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  type: {{ .Values.service.type }}
+  selector:
+    {{- include "datametl.selectorLabels" . | nindent 4 }}
+    {{- if .Values.oauth2Proxy.enabled }}
+    app.kubernetes.io/component: oauth2-proxy
+    {{- else }}
+    app.kubernetes.io/component: frontend
+    {{- end }}
+  ports:
+    - name: http
+      port: {{ .Values.service.port }}
+      {{- if .Values.oauth2Proxy.enabled }}
+      targetPort: 4180
+      {{- else }}
+      targetPort: 3000
+      {{- end }}
+      {{- if and (eq .Values.service.type "NodePort") .Values.service.nodePort }}
+      nodePort: {{ .Values.service.nodePort }}
+      {{- end }}

@@ -1,0 +1,79 @@
+{{- if .Values.oauth2Proxy.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "datametl.fullname" . }}-oauth2-proxy
+  labels:
+    {{- include "datametl.labels" . | nindent 4 }}
+    app.kubernetes.io/component: oauth2-proxy
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  replicas: {{ .Values.oauth2Proxy.replicas }}
+  selector:
+    matchLabels:
+      {{- include "datametl.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: oauth2-proxy
+  template:
+    metadata:
+      labels:
+        {{- include "datametl.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: oauth2-proxy
+    spec:
+      {{- include "datametl.imagePullSecrets" . | nindent 6 }}
+      containers:
+        - name: oauth2-proxy
+          image: {{ .Values.oauth2Proxy.image }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
+            - --provider=oidc
+            - --oidc-issuer-url={{ required "oauth2Proxy.oidc.issuerUrl is required" .Values.oauth2Proxy.oidc.issuerUrl }}
+            - --client-id={{ .Values.oauth2Proxy.oidc.clientId }}
+            - --upstream=http://{{ include "datametl.fullname" . }}-frontend:3000
+            - --http-address=0.0.0.0:4180
+            - --email-domain={{ .Values.oauth2Proxy.oidc.emailDomains }}
+            - --scope={{ .Values.oauth2Proxy.oidc.scope }}
+            - --reverse-proxy=true
+            - --cookie-secure={{ .Values.oauth2Proxy.cookieSecure }}
+            - --cookie-csrf-per-request=true
+            - --cookie-csrf-expire=5m
+            - --skip-provider-button=true
+            # Forward the Keycloak token downstream so Phase 2 (in-app RBAC) can validate it.
+            - --pass-access-token=true
+            - --pass-authorization-header=true
+            - --set-authorization-header=true
+            {{- if .Values.oauth2Proxy.externalUrl }}
+            - --redirect-url={{ .Values.oauth2Proxy.externalUrl }}/oauth2/callback
+            {{- end }}
+            {{- range $k, $v := .Values.oauth2Proxy.extraArgs }}
+            - --{{ $k }}={{ $v }}
+            {{- end }}
+          env:
+            - name: OAUTH2_PROXY_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "datametl.secretName" . }}
+                  key: OAUTH2_PROXY_CLIENT_SECRET
+            - name: OAUTH2_PROXY_COOKIE_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "datametl.secretName" . }}
+                  key: OAUTH2_PROXY_COOKIE_SECRET
+          ports:
+            - name: http
+              containerPort: 4180
+          readinessProbe:
+            httpGet:
+              path: /ping
+              port: 4180
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /ping
+              port: 4180
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          resources:
+            {{- toYaml .Values.oauth2Proxy.resources | nindent 12 }}
+{{- end }}

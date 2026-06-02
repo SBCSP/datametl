@@ -1,0 +1,49 @@
+# Reference values for the on-prem RKE2/Rancher deploy:
+#   external HA nginx (TLS terminate) → NodePort → oauth2-proxy → app.
+# Replace REPLACE_* before use, or (recommended for prod) set secrets.existingSecret +
+# oidc via a Secret managed by External Secrets Operator and drop the inline secrets.
+
+image:
+  registry: ghcr.io
+  namespace: sbcsp
+  # For air-gapped clusters, mirror the images and add the pull secret:
+  # pullSecrets: [{ name: harbor-cred }]
+
+secrets:
+  encryptionKey: "REPLACE_WITH_FERNET_KEY" # python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+  # existingSecret: datametl-secrets   # preferred in prod (ESO); then omit the inline secrets
+
+postgres:
+  enabled: true
+  auth:
+    password: "REPLACE_WITH_DB_PASSWORD"
+  persistence:
+    storageClass: "longhorn" # your Rancher storage class
+    size: 8Gi
+
+redis:
+  enabled: true
+  persistence:
+    storageClass: "longhorn"
+    size: 1Gi
+
+oauth2Proxy:
+  enabled: true
+  oidc:
+    issuerUrl: "https://keycloak.example.com/realms/datametl"
+    clientId: "datametl"
+    clientSecret: "REPLACE_WITH_KEYCLOAK_CLIENT_SECRET"
+    cookieSecret: "REPLACE_WITH_BASE64_32B" # openssl rand -base64 32
+  externalUrl: "https://datametl.example.com" # the hostname your external nginx serves
+
+# Entry exposed as a NodePort; point the external HA nginx at <node-ip>:30080.
+service:
+  type: NodePort
+  port: 80
+  nodePort: 30080
+
+ingress:
+  enabled: false
+
+worker:
+  replicas: 2

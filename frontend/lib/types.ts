@@ -372,3 +372,36 @@ export interface JobStatus {
   result: unknown;
   error: string | null;
 }
+
+// --- SQL scripts ---
+
+export interface SqlScript {
+  id: string;
+  name: string;
+  content: string;
+  created_at: string;
+  updated_at: string;
+}
+export interface StatementResult {
+  index: number;
+  sql: string;
+  kind: "rows" | "command" | "error";
+  columns: string[];
+  rows: unknown[][];
+  row_count: number;
+  truncated: boolean;
+  duration_ms: number;
+  error: string | null;
+}
+export interface ConnectionRunResult {
+  connection_id: string;
+  connection_name: string;
+  ok: boolean;
+  error: string | null;
+  statements: StatementResult[];
+}
+export interface ScriptRunResult {
+  script_id: string;
+  statement_count: number;
+  connections: ConnectionRunResult[];
+}

@@ -1,0 +1,51 @@
+# Reference values for a cloud/in-cluster Ingress controller (AWS ALB, nginx-ingress, etc.):
+#   client → Ingress (TLS) → ClusterIP entry Service → oauth2-proxy → app.
+
+image:
+  registry: ghcr.io
+  namespace: sbcsp
+
+secrets:
+  encryptionKey: "REPLACE_WITH_FERNET_KEY"
+
+postgres:
+  enabled: true
+  auth:
+    password: "REPLACE_WITH_DB_PASSWORD"
+  persistence:
+    storageClass: "gp3"
+    size: 8Gi
+
+redis:
+  enabled: true
+  persistence:
+    storageClass: "gp3"
+    size: 1Gi
+
+oauth2Proxy:
+  enabled: true
+  oidc:
+    issuerUrl: "https://keycloak.example.com/realms/datametl"
+    clientId: "datametl"
+    clientSecret: "REPLACE_WITH_KEYCLOAK_CLIENT_SECRET"
+    cookieSecret: "REPLACE_WITH_BASE64_32B"
+  externalUrl: "https://datametl.example.com"
+
+# Entry is a ClusterIP fronted by the Ingress below.
+service:
+  type: ClusterIP
+  port: 80
+
+ingress:
+  enabled: true
+  className: nginx # or "alb" with the AWS Load Balancer Controller
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-buffer-size: "16k" # oauth2-proxy cookies can be large
+  host: datametl.example.com
+  tls:
+    - secretName: datametl-tls
+      hosts:
+        - datametl.example.com
+
+worker:
+  replicas: 2

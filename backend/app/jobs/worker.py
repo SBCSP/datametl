@@ -6,7 +6,13 @@ import logging
 from arq.connections import RedisSettings
 
 from app.config import settings
-from app.jobs.tasks import introspect_connection, run_comparison, run_migration, run_verification
+from app.jobs.tasks import (
+    execute_sql_script,
+    introspect_connection,
+    run_comparison,
+    run_migration,
+    run_verification,
+)
 
 # arq workers run in their own process (separate from FastAPI's main.py), so configure
 # the root logger here too. Without this, our `log.info(...)` calls in introspectors are
@@ -23,7 +29,7 @@ def _redis_settings() -> RedisSettings:
 
 
 class WorkerSettings:
-    functions = [introspect_connection, run_comparison, run_migration, run_verification]
+    functions = [introspect_connection, run_comparison, run_migration, run_verification, execute_sql_script]
     redis_settings = _redis_settings()
     keep_result = 3600  # seconds — UI polls for status
     max_jobs = 4

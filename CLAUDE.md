@@ -114,6 +114,14 @@ Two compose files:
 
 Backend and worker share a single image; the worker just overrides `command:`. Both bind-mount the `backend/` directory for live reload, with an anonymous volume on `.venv` so the host's empty `.venv` doesn't shadow the container's.
 
+### Kubernetes / Helm deploy
+
+[deploy/helm/datametl](deploy/helm/datametl) packages the whole stack for Kubernetes (ArgoCD-friendly), using the same `ghcr.io/sbcsp/datametl-*` images the [release workflow](.github/workflows/release.yml) publishes. Key points:
+- **Single host, same-origin**: the frontend's [middleware.ts](frontend/middleware.ts) proxies `/api/*` to the backend at runtime (via `NEXT_INTERNAL_API_BASE_URL`), so the browser only ever hits one origin. No app code changes were needed for k8s.
+- **Auth front**: oauth2-proxy is the in-cluster entry point (OIDC → Keycloak), reverse-proxying to the frontend. Exposure is pluggable — `service.type` (NodePort default, for an external nginx) or an optional `ingress`.
+- **Ordering**: alembic runs as a migrate Job; ArgoCD sync-waves (postgres/redis → migrate → app) plus backend/worker `wait-for-schema` init containers guarantee the schema exists before the app serves.
+- Don't hardcode an ingress controller or registry in the chart — both are values-driven so others can run it on AWS or on-prem.
+
 ## Code conventions worth knowing
 
 - **Normalized type vocabulary** is intentionally small (see `NormalizedType` in [backend/app/introspection/normalized.py](backend/app/introspection/normalized.py)). Don't add a new normalized type unless you also extend the registry default mapping for every engine you support.
@@ -143,7 +151,7 @@ make migrate
 
 - Don't add Supabase-specific logic to `connectors/postgres.py` or `introspection/postgres.py` — Supabase awareness lives in `recipes/supabase.py` only. The introspector treats Supabase as plain Postgres.
 - Don't return credentials from API endpoints, even for "internal" routes. There are no internal routes — this binds to localhost but the boundary still matters.
-- Don't introduce app-level auth in Phase 1. The user explicitly opted out.
+- Auth is enforced at the **edge**, not in app code. The Kubernetes deploy ([deploy/helm/datametl](deploy/helm/datametl)) ships **oauth2-proxy** in front of the app for **Keycloak/OIDC SSO**; the FastAPI/Next.js code stays auth-free for now. Don't add in-app login/session code. (In-app JWT validation + viewer/operator RBAC + audit is a planned **Phase 2** — additive, since oauth2-proxy already forwards the Keycloak token.)
 - Don't bypass arq for "quick" operations. If it touches a user-supplied DB, it goes through the worker.
 - **Phase 2 only ever writes to the destination, never the source.** The strategy opens an explicit `SET TRANSACTION READ ONLY` on the source connection. If you add a new strategy or modify the existing one, preserve that invariant.
 - **Phase 2 does not auto-`CREATE TABLE`.** Tables only on source are surfaced as DDL preview the user copies/runs themselves. Don't change this without an explicit user-facing safeguard.

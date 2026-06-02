@@ -1,0 +1,41 @@
+{{- if .Values.migrations.enabled }}
+# Alembic migration runner.
+# Ordering works under BOTH runtimes:
+#   * ArgoCD: sync-wave "1" (postgres = wave 0, app = wave 2). Replace=true recreates the
+#     immutable Job on every sync; ArgoCD waits for it to complete before wave 2.
+#   * plain Helm: the name carries .Release.Revision so every `helm upgrade` makes a fresh
+#     Job; the backend/worker init containers (wait-for-schema) block until this completes.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "datametl.fullname" . }}-migrate-{{ .Release.Revision }}
+  labels:
+    {{- include "datametl.labels" . | nindent 4 }}
+    app.kubernetes.io/component: migrate
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+    argocd.argoproj.io/sync-options: Replace=true
+spec:
+  ttlSecondsAfterFinished: 600
+  backoffLimit: 3
+  template:
+    metadata:
+      labels:
+        {{- include "datametl.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: migrate
+    spec:
+      restartPolicy: Never
+      serviceAccountName: {{ include "datametl.serviceAccountName" . }}
+      {{- include "datametl.imagePullSecrets" . | nindent 6 }}
+      initContainers:
+        {{- include "datametl.initWaitDb" . | nindent 8 }}
+      containers:
+        - name: migrate
+          image: {{ include "datametl.image" (list . .Values.backend.repo .Values.backend.tag) }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["alembic", "upgrade", "head"]
+          env:
+            {{- include "datametl.appEnv" . | nindent 12 }}
+          resources:
+            {{- toYaml .Values.migrations.resources | nindent 12 }}
+{{- end }}

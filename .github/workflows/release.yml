@@ -99,6 +99,20 @@ jobs:
           cache-from: type=gha,scope=frontend
           cache-to: type=gha,mode=max,scope=frontend
 
+      # --- Helm chart (OCI) ---
+      # Publishes the chart to oci://ghcr.io/sbcsp/charts/datametl:<version-without-v>.
+      # ArgoCD can point at this OCI chart, or at the chart path in Git — see deploy/argocd/.
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+
+      - name: Package + push Helm chart
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          CHART_VERSION="${VERSION#v}"   # chart version must be SemVer (no leading v)
+          helm registry login "${{ env.REGISTRY }}" -u "${{ github.actor }}" --password-stdin <<< "${{ secrets.GITHUB_TOKEN }}"
+          helm package deploy/helm/datametl --version "${CHART_VERSION}" --app-version "${VERSION}"
+          helm push "datametl-${CHART_VERSION}.tgz" "oci://${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/charts"
+
       # --- Release artifacts ---
       # End users only need: docker-compose.yml, .env.example, install.sh.
       # We rename the deploy compose to docker-compose.yml for ergonomics — that's the

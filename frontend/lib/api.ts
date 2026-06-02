@@ -23,6 +23,7 @@ import type {
   SchemaSummary,
   Snapshot,
   SnapshotSummary,
+  SqlScript,
   TestConnectionResult,
 } from "./types";
 
@@ -127,6 +128,20 @@ export const api = {
   getVerificationRun: (id: string) => request<VerificationRun>(`/api/verifications/runs/${id}`),
   cancelVerificationRun: (id: string) =>
     request<VerificationRun>(`/api/verifications/runs/${id}/cancel`, { method: "POST" }),
+
+  // SQL scripts
+  listScripts: () => request<SqlScript[]>("/api/scripts"),
+  getScript: (id: string) => request<SqlScript>(`/api/scripts/${id}`),
+  createScript: (body: { name: string; content: string }) =>
+    request<SqlScript>("/api/scripts", { method: "POST", body: JSON.stringify(body) }),
+  updateScript: (id: string, body: { name?: string; content?: string }) =>
+    request<SqlScript>(`/api/scripts/${id}`, { method: "PUT", body: JSON.stringify(body) }),
+  deleteScript: (id: string) => request<void>(`/api/scripts/${id}`, { method: "DELETE" }),
+  runScript: (id: string, connectionIds: string[]) =>
+    request<JobEnqueued>(`/api/scripts/${id}/run`, {
+      method: "POST",
+      body: JSON.stringify({ connection_ids: connectionIds }),
+    }),
 
   // Activity (unified runs feed)
   listActivity: () => request<ActivityEntry[]>("/api/activity"),

@@ -7,6 +7,7 @@ import {
   Activity,
   ArrowRightLeft,
   Database,
+  FileCode,
   GitCompareArrows,
   History,
   LayoutDashboard,
@@ -46,6 +47,12 @@ const NAV: { section: string; items: NavItem[] }[] = [
       { href: "/migrations", label: "Migrations", icon: ArrowRightLeft, matchPrefix: "/migrations" },
       { href: "/verification", label: "Verification", icon: ShieldCheck, matchPrefix: "/verification" },
       { href: "/runs", label: "Runs", icon: History, matchPrefix: "/runs" },
+    ],
+  },
+  {
+    section: "Tools",
+    items: [
+      { href: "/scripts", label: "SQL Scripts", icon: FileCode, matchPrefix: "/scripts" },
     ],
   },
   {

@@ -359,6 +359,60 @@ class ActivityEntry(BaseModel):
     href: str
 
 
+# --- SQL scripts ---
+
+class SqlScriptCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=255)
+    content: str = ""
+
+
+class SqlScriptUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=255)
+    content: str | None = None
+
+
+class SqlScriptRead(BaseModel):
+    id: uuid.UUID
+    name: str
+    content: str
+    created_at: datetime
+    updated_at: datetime
+
+
+class SqlScriptRunRequest(BaseModel):
+    connection_ids: list[uuid.UUID] = Field(min_length=1)
+
+
+class StatementResultRead(BaseModel):
+    """Result of one statement on one connection. Mirrors scripts.runner.StatementResult.
+    Delivered to the frontend inside the job result (GET /api/jobs/{id}), not as a direct
+    response_model — defined here so the shape is documented and kept in sync."""
+
+    index: int
+    sql: str
+    kind: Literal["rows", "command", "error"]
+    columns: list[str]
+    rows: list[list[Any]]
+    row_count: int
+    truncated: bool
+    duration_ms: int
+    error: str | None = None
+
+
+class ConnectionRunResultRead(BaseModel):
+    connection_id: uuid.UUID
+    connection_name: str
+    ok: bool
+    error: str | None = None
+    statements: list[StatementResultRead]
+
+
+class ScriptRunResult(BaseModel):
+    script_id: uuid.UUID
+    statement_count: int
+    connections: list[ConnectionRunResultRead]
+
+
 # --- Settings ---
 
 class SettingsResponse(BaseModel):

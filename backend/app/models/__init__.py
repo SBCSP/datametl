@@ -23,6 +23,7 @@ from app.models.verification_run_table import (  # noqa: E402, F401
     VerificationRunTable,
     VerificationTableStatus,
 )
+from app.models.sql_script import SqlScript  # noqa: E402, F401
 
 __all__ = [
     "Base",
@@ -39,4 +40,5 @@ __all__ = [
     "VerificationRunStatus",
     "VerificationRunTable",
     "VerificationTableStatus",
+    "SqlScript",
 ]

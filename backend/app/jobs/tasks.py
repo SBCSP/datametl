@@ -21,6 +21,8 @@ from app.db import SessionLocal
 from app.models.comparison import Comparison
 from app.models.connection import Connection
 from app.models.schema_snapshot import SchemaSnapshot
+from app.models.sql_script import SqlScript
+from app.scripts.runner import ROW_CAP, STATEMENT_TIMEOUT_S, split_statements
 from app.recipes.supabase import analyze as analyze_supabase
 from app.comparison import diff_schemas
 from app.mapping import seed_mappings_for_comparison
@@ -120,3 +122,61 @@ async def run_verification(ctx: dict[str, Any], run_id: str) -> dict[str, Any]:
             return execute_verification_run(db, run_uuid)
 
     return await asyncio.to_thread(_run)
+
+
+async def execute_sql_script(
+    ctx: dict[str, Any], script_id: str, connection_ids: list[str]
+) -> dict[str, Any]:
+    """Run a saved SQL script (read-only) against each selected connection and collect results.
+
+    Each connection runs in its own thread (the SQL is sync, like introspect) and is fully
+    isolated: a connection that can't connect or hits an error becomes a failed entry in the
+    output rather than failing the whole run. Never writes — every statement executes inside a
+    read-only transaction that is rolled back (see PostgresConnector.run_readonly_statements).
+    """
+    script_uuid = uuid.UUID(script_id)
+
+    # Decrypt credentials while the metadata session is open, then hand plain dicts to the
+    # worker threads. A missing connection (deleted between save and run) is kept as a marker
+    # so it surfaces as one failed card instead of aborting the run.
+    with SessionLocal() as db:
+        script = db.get(SqlScript, script_uuid)
+        if script is None:
+            raise ValueError(f"Unknown script: {script_id}")
+        statements = split_statements(script.content)
+
+        conns: list[dict[str, Any]] = []
+        for cid in (uuid.UUID(c) for c in connection_ids):
+            conn = db.get(Connection, cid)
+            if conn is None:
+                conns.append({"id": str(cid), "name": "(deleted connection)", "engine": None, "creds": None})
+            else:
+                conns.append({
+                    "id": str(conn.id),
+                    "name": conn.name,
+                    "engine": conn.engine,
+                    "creds": vault.decrypt(conn.encrypted_credentials),
+                })
+
+    def _run_one(c: dict[str, Any]) -> dict[str, Any]:
+        if c["engine"] is None:
+            return {"connection_id": c["id"], "connection_name": c["name"], "ok": False,
+                    "error": "Connection not found", "statements": []}
+        try:
+            connector = for_engine(c["engine"], c["creds"])
+            stmts = connector.run_readonly_statements(statements, ROW_CAP, STATEMENT_TIMEOUT_S)
+            ok = all(s["error"] is None for s in stmts)
+            return {"connection_id": c["id"], "connection_name": c["name"], "ok": ok,
+                    "error": None, "statements": stmts}
+        except Exception as e:  # connection-level failure, isolate per connection
+            # str(e.__cause__ or e) mirrors test_connection: surfaces the psycopg message
+            # (host/port/db/user) without the password, which psycopg never includes.
+            return {"connection_id": c["id"], "connection_name": c["name"], "ok": False,
+                    "error": str(getattr(e, "__cause__", None) or e), "statements": []}
+
+    results = await asyncio.gather(*[asyncio.to_thread(_run_one, c) for c in conns])
+    return {
+        "script_id": script_id,
+        "statement_count": len(statements),
+        "connections": list(results),
+    }

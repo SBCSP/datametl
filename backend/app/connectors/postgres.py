@@ -2,15 +2,33 @@ from __future__ import annotations
 
 import hashlib
 import os
+import time
 from typing import Any
 from urllib.parse import quote_plus
 
 from sqlalchemy import create_engine, text
+from sqlalchemy.engine import Engine
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.connectors.base import ConnectionTestResult, Connector
 from app.introspection import postgres as pg_introspect
 from app.introspection.normalized import Schema
+from app.scripts.runner import ROW_CAP, STATEMENT_TIMEOUT_S, StatementResult, cap_rows
+
+_JSON_PRIMITIVES = (type(None), bool, int, float, str)
+
+
+def _jsonable(value: Any) -> Any:
+    """Coerce a DB cell to something the job-result JSON can carry.
+
+    bytea → hex string; JSONB → passed through (already dict/list); everything exotic
+    (datetime, Decimal, UUID, …) → str so the wire shape is predictable for the frontend.
+    """
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        return "\\x" + bytes(value).hex()
+    if isinstance(value, (*_JSON_PRIMITIVES, list, dict)):
+        return value
+    return str(value)
 
 # Where to materialize PEMs that come in via the API. Inside the container, /tmp is fine.
 # Cert contents are public root CAs (not secret) so the only requirement is stable paths.
@@ -56,7 +74,7 @@ def _materialize_root_cert(pem: str | None) -> str | None:
 class PostgresConnector(Connector):
     engine = "postgres"
 
-    def _engine(self):
+    def _engine(self) -> Engine:
         connect_args: dict[str, Any] = {"connect_timeout": 5}
         if cert_path := _materialize_root_cert(self.credentials.get("sslrootcert")):
             connect_args["sslrootcert"] = cert_path
@@ -79,3 +97,55 @@ class PostgresConnector(Connector):
 
     def introspect(self) -> Schema:
         return pg_introspect.introspect(self._engine())
+
+    def run_readonly_statements(
+        self,
+        statements: list[str],
+        row_cap: int = ROW_CAP,
+        timeout_s: int = STATEMENT_TIMEOUT_S,
+    ) -> list[StatementResult]:
+        results: list[StatementResult] = []
+        eng = self._engine()
+        with eng.connect() as conn:
+            # First commands in the transaction: lock it read-only (so any write/DDL fails with
+            # "cannot execute ... in a read-only transaction") and cap statement runtime. Both
+            # are rolled back at the end along with everything else.
+            conn.execute(text("SET TRANSACTION READ ONLY"))
+            conn.execute(text(f"SET statement_timeout = '{int(timeout_s)}s'"))
+            for index, stmt in enumerate(statements):
+                started = time.perf_counter()
+                try:
+                    cursor = conn.execute(text(stmt))
+                    duration_ms = int((time.perf_counter() - started) * 1000)
+                    if cursor.returns_rows:
+                        fetched = cursor.fetchmany(row_cap + 1)
+                        capped, truncated = cap_rows(list(fetched), row_cap)
+                        rows = [[_jsonable(v) for v in row] for row in capped]
+                        results.append(
+                            StatementResult(
+                                index=index, sql=stmt, kind="rows",
+                                columns=list(cursor.keys()), rows=rows, row_count=len(rows),
+                                truncated=truncated, duration_ms=duration_ms, error=None,
+                            )
+                        )
+                    else:
+                        affected = cursor.rowcount if cursor.rowcount and cursor.rowcount > 0 else 0
+                        results.append(
+                            StatementResult(
+                                index=index, sql=stmt, kind="command",
+                                columns=[], rows=[], row_count=affected,
+                                truncated=False, duration_ms=duration_ms, error=None,
+                            )
+                        )
+                except SQLAlchemyError as e:
+                    duration_ms = int((time.perf_counter() - started) * 1000)
+                    results.append(
+                        StatementResult(
+                            index=index, sql=stmt, kind="error",
+                            columns=[], rows=[], row_count=0, truncated=False,
+                            duration_ms=duration_ms, error=str(e.__cause__ or e),
+                        )
+                    )
+                    break  # stop this connection's remaining statements on first error
+            conn.rollback()
+        return results

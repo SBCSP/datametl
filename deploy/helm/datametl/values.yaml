@@ -1,0 +1,135 @@
+# Default values for the DataMETL chart.
+# Phase 1: deploys the full stack behind oauth2-proxy (Keycloak/OIDC edge SSO).
+# Any authenticated user gets full access — in-app viewer/operator RBAC is Phase 2.
+
+# -- Container images. Backend + worker share one image; frontend is separate.
+# tag defaults to .Chart.appVersion when left empty.
+image:
+  registry: ghcr.io
+  namespace: sbcsp
+  pullPolicy: IfNotPresent
+  # imagePullSecrets for a private/mirrored registry, e.g. [{ name: harbor-cred }]
+  pullSecrets: []
+
+backend:
+  repo: datametl-backend
+  tag: ""
+  replicas: 1
+  resources: {}
+  # readiness/liveness probe the backend's GET /health
+  probes:
+    enabled: true
+
+worker:
+  repo: datametl-backend # same image as backend, different command
+  tag: ""
+  replicas: 2 # scale knob for large migration/verification jobs
+  resources: {}
+
+frontend:
+  repo: datametl-frontend
+  tag: ""
+  replicas: 1
+  resources: {}
+
+# -- Non-secret app config.
+config:
+  logLevel: INFO
+  # CORS is irrelevant in the single-host setup (browser only hits same-origin /api via the
+  # frontend middleware). Left permissive for anyone exposing the API directly.
+  corsOrigins: ""
+
+# -- Secrets. Provide values inline for dev, OR reference a pre-created Secret (existingSecret)
+# for prod / External Secrets Operator. When existingSecret is set, it MUST contain every key
+# the chart would otherwise generate:
+#   ENCRYPTION_KEY, DATABASE_URL, REDIS_URL, POSTGRES_PASSWORD,
+#   OAUTH2_PROXY_CLIENT_SECRET, OAUTH2_PROXY_COOKIE_SECRET
+# WARNING: ENCRYPTION_KEY (Fernet) must be durable + versioned. Losing/rotating it without
+# re-encryption makes every stored DB credential unrecoverable.
+secrets:
+  encryptionKey: "" # 44-char urlsafe-base64 Fernet key (required if no existingSecret)
+  existingSecret: "" # name of a Secret holding all keys listed above
+
+# -- Metadata Postgres (DataMETL's own store — NOT a migration source/destination).
+postgres:
+  enabled: true # false → use postgres.external.*
+  image: postgres:16
+  auth:
+    username: datametl
+    database: datametl
+    password: "" # required if enabled and no existingSecret
+    existingSecret: "" # Secret containing key POSTGRES_PASSWORD
+  persistence:
+    enabled: true
+    storageClass: "" # e.g. longhorn / local-path (empty = cluster default)
+    size: 8Gi
+  resources: {}
+  external: # used when enabled=false
+    host: ""
+    port: 5432
+    database: datametl
+    username: datametl
+    # password comes from secrets.existingSecret key POSTGRES_PASSWORD, or postgres.auth.password
+
+# -- Redis (arq job queue).
+redis:
+  enabled: true # false → use redis.external.url
+  image: redis:7-alpine
+  persistence:
+    enabled: true
+    storageClass: ""
+    size: 1Gi
+  resources: {}
+  external:
+    url: "" # e.g. redis://my-redis:6379/0
+
+# -- oauth2-proxy: the auth front + single entry point (OIDC → your Keycloak).
+oauth2Proxy:
+  enabled: true
+  image: quay.io/oauth2-proxy/oauth2-proxy:v7.7.1
+  replicas: 1
+  resources: {}
+  oidc:
+    issuerUrl: "" # https://keycloak.example.com/realms/<realm>
+    clientId: "datametl"
+    clientSecret: "" # required if no secrets.existingSecret
+    cookieSecret: "" # 32-byte secret (base64). Generate: openssl rand -base64 32
+    emailDomains: "*"
+    scope: "openid email profile"
+  # Public URL users hit (through the external nginx / ingress). Drives the OIDC redirect URL
+  # and cookie. Example: https://datametl.example.com
+  externalUrl: ""
+  cookieSecure: true # cookies marked Secure (TLS terminated upstream by nginx/ingress)
+  # Extra raw flags, e.g. { "skip-auth-routes": "^/health$" }
+  extraArgs: {}
+
+# -- Entry Service (the oauth2-proxy Service the external nginx / ingress targets).
+service:
+  type: NodePort # NodePort (on-prem external nginx) | ClusterIP | LoadBalancer
+  port: 80
+  nodePort: "" # fixed NodePort (e.g. 30080); empty = auto-assign
+
+# -- Optional Kubernetes Ingress (for AWS ALB / nginx-ingress users). Off by default since
+# the reference setup is external-nginx → NodePort.
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  host: ""
+  tls: [] # [{ secretName: datametl-tls, hosts: [datametl.example.com] }]
+
+# -- Alembic migrations run as a Job (Helm hook + ArgoCD sync-wave 1).
+migrations:
+  enabled: true
+  resources: {}
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+podSecurityContext: {}
+securityContext: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}

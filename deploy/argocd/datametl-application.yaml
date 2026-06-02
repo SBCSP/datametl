@@ -1,0 +1,47 @@
+# Example ArgoCD Application for DataMETL.
+#
+# Two source options (pick one):
+#   A) Git path  — point at this repo's chart dir (shown below). Simplest.
+#   B) OCI chart — repoURL: ghcr.io/sbcsp/charts, chart: datametl, targetRevision: <version>
+#      (the release workflow publishes the chart there).
+#
+# Secrets: do NOT commit real secret values. Either reference an existingSecret managed by
+# External Secrets Operator (recommended) via helm values, or use an argocd vault plugin.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: datametl
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/sbcsp/datametl.git
+    targetRevision: main
+    path: deploy/helm/datametl
+    helm:
+      valueFiles:
+        - values-example-rke2.yaml
+      # Inline overrides — point at an ESO-managed Secret instead of inline secret values:
+      values: |
+        secrets:
+          existingSecret: datametl-secrets
+        oauth2Proxy:
+          oidc:
+            issuerUrl: https://keycloak.example.com/realms/datametl
+          externalUrl: https://datametl.example.com
+        service:
+          type: NodePort
+          nodePort: 30080
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: datametl
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      # ServerSideApply avoids last-applied annotation bloat on large manifests.
+      - ServerSideApply=true
+  # The chart annotates resources with argocd.argoproj.io/sync-wave so ordering is:
+  #   wave 0: postgres + redis  →  wave 1: alembic migrate Job  →  wave 2: backend/worker/frontend/oauth2-proxy
