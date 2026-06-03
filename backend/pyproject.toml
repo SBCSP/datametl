@@ -17,6 +17,7 @@ dependencies = [
     "python-multipart>=0.0.20",
     "watchfiles>=0.24",
     "sqlparse>=0.5",
+    "anthropic>=0.40",
 ]
 
 [dependency-groups]

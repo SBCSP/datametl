@@ -7,14 +7,16 @@ with password — are never returned. URLs are shown with credentials redacted.
 from __future__ import annotations
 
 import re
-from typing import Any
 
 from arq.connections import RedisSettings, create_pool
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
+from sqlalchemy.orm import Session
 
-from app.api.schemas_io import SettingsResponse
+from app.api.schemas_io import AnthropicKeyStatus, AnthropicKeyUpdate, SettingsResponse
 from app.config import settings as cfg
+from app.db import get_db
 from app.jobs.worker import WorkerSettings
+from app.settings_store import has_anthropic_key, set_anthropic_key
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
@@ -36,19 +38,20 @@ async def _queue_depth() -> int:
     try:
         pool = await create_pool(RedisSettings.from_dsn(cfg.redis_url))
         try:
-            return await pool.zcard("arq:queue")
+            return int(await pool.zcard("arq:queue"))
         finally:
             await pool.close()
-    except Exception:  # noqa: BLE001
+    except Exception:
         return 0
 
 
 @router.get("", response_model=SettingsResponse)
-async def get_settings() -> SettingsResponse:
+async def get_settings(db: Session = Depends(get_db)) -> SettingsResponse:
     return SettingsResponse(
         version=_VERSION,
         log_level=cfg.log_level,
         encryption_key_set=bool(cfg.encryption_key),
+        anthropic_api_key_set=has_anthropic_key(db),
         cors_origins=cfg.cors_origin_list,
         redis_url_redacted=_redact_url(cfg.redis_url),
         database_url_redacted=_redact_url(cfg.database_url),
@@ -56,3 +59,12 @@ async def get_settings() -> SettingsResponse:
         worker_max_jobs=getattr(WorkerSettings, "max_jobs", 4),
         worker_job_timeout_seconds=getattr(WorkerSettings, "job_timeout", 1800),
     )
+
+
+@router.put("/anthropic-key", response_model=AnthropicKeyStatus)
+def update_anthropic_key(
+    payload: AnthropicKeyUpdate, db: Session = Depends(get_db)
+) -> AnthropicKeyStatus:
+    """Store (or clear, when blank) the Anthropic API key. Write-only — never returned."""
+    set_anthropic_key(db, payload.api_key)
+    return AnthropicKeyStatus(anthropic_api_key_set=has_anthropic_key(db))

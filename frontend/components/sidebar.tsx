@@ -6,6 +6,7 @@ import { useQuery } from "@tanstack/react-query";
 import {
   Activity,
   ArrowRightLeft,
+  Bot,
   Database,
   FileCode,
   GitCompareArrows,
@@ -52,6 +53,7 @@ const NAV: { section: string; items: NavItem[] }[] = [
   {
     section: "Tools",
     items: [
+      { href: "/chat", label: "Mel", icon: Bot, matchPrefix: "/chat" },
       { href: "/scripts", label: "SQL Scripts", icon: FileCode, matchPrefix: "/scripts" },
     ],
   },

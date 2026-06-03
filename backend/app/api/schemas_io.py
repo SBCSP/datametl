@@ -419,9 +419,67 @@ class SettingsResponse(BaseModel):
     version: str
     log_level: str
     encryption_key_set: bool
+    anthropic_api_key_set: bool = False
     cors_origins: list[str]
     redis_url_redacted: str
     database_url_redacted: str
     queue_depth: int
     worker_max_jobs: int
     worker_job_timeout_seconds: int
+
+
+class AnthropicKeyUpdate(BaseModel):
+    """Write-only — empty/blank clears the stored key. The key is never returned."""
+
+    api_key: str | None = None
+
+
+class AnthropicKeyStatus(BaseModel):
+    anthropic_api_key_set: bool
+
+
+# --- Chat ---
+
+class ChatMessageIn(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str
+
+
+class ChatRequest(BaseModel):
+    model: str
+    messages: list[ChatMessageIn] = Field(min_length=1)
+
+
+class ChatModelsResponse(BaseModel):
+    models: list[str]
+    default: str
+
+
+class ChatSessionCreate(BaseModel):
+    title: str | None = None  # derived from the first user message when blank
+    model: str
+    messages: list[ChatMessageIn] = Field(default_factory=list)
+
+
+class ChatSessionUpdate(BaseModel):
+    title: str | None = None
+    model: str | None = None
+    messages: list[ChatMessageIn]
+
+
+class ChatSessionSummary(BaseModel):
+    id: uuid.UUID
+    title: str
+    model: str
+    message_count: int
+    created_at: datetime
+    updated_at: datetime
+
+
+class ChatSessionRead(BaseModel):
+    id: uuid.UUID
+    title: str
+    model: str
+    messages: list[ChatMessageIn]
+    created_at: datetime
+    updated_at: datetime

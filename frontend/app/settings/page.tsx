@@ -1,25 +1,41 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
-import { CheckCircle2, ExternalLink, Lock, Server, XCircle } from "lucide-react";
+import { useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
+import { CheckCircle2, ExternalLink, Lock, Server, Sparkles, XCircle } from "lucide-react";
 import { api } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { PageHeader } from "@/components/page-header";
 
 export default function SettingsPage() {
+  const qc = useQueryClient();
   const { data, isLoading } = useQuery({
     queryKey: ["settings"],
     queryFn: api.getSettings,
     refetchInterval: 10_000,
   });
 
+  const [anthropicKey, setAnthropicKey] = useState("");
+  const saveKey = useMutation({
+    mutationFn: (key: string) => api.updateAnthropicKey(key),
+    onSuccess: (r) => {
+      setAnthropicKey("");
+      qc.invalidateQueries({ queryKey: ["settings"] });
+      toast.success(r.anthropic_api_key_set ? "Anthropic key saved" : "Anthropic key cleared");
+    },
+    onError: (e) => toast.error(String(e)),
+  });
+
   return (
     <div>
       <PageHeader
         title="Settings"
-        description="App-level configuration and diagnostics. Read-only in this release."
+        description="App-level configuration and diagnostics. Most values are env-driven and read-only; the Anthropic API key is editable below."
       />
 
       {isLoading || !data ? (
@@ -78,6 +94,63 @@ export default function SettingsPage() {
                 <code className="font-mono">make key</code>, replace it in <code className="font-mono">.env</code>, and
                 restart the stack — but be aware: existing connections were encrypted with the old key and will need to
                 be re-entered.
+              </p>
+            </CardContent>
+          </Card>
+
+          {/* Anthropic API key (editable, write-only) */}
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base flex items-center gap-2">
+                <Sparkles className="h-4 w-4" /> Anthropic API key
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3 text-sm">
+              <Row label="Status">
+                {data.anthropic_api_key_set ? (
+                  <Badge variant="success">
+                    <CheckCircle2 className="h-3 w-3 mr-1" /> set
+                  </Badge>
+                ) : (
+                  <Badge variant="destructive">
+                    <XCircle className="h-3 w-3 mr-1" /> not set
+                  </Badge>
+                )}
+              </Row>
+              <div className="space-y-1.5">
+                <Label htmlFor="anthropic-key">{data.anthropic_api_key_set ? "Replace key" : "Set key"}</Label>
+                <Input
+                  id="anthropic-key"
+                  type="password"
+                  placeholder="sk-ant-…"
+                  autoComplete="off"
+                  value={anthropicKey}
+                  onChange={(e) => setAnthropicKey(e.target.value)}
+                />
+              </div>
+              <div className="flex gap-2">
+                <Button
+                  size="sm"
+                  onClick={() => saveKey.mutate(anthropicKey)}
+                  disabled={!anthropicKey.trim() || saveKey.isPending}
+                >
+                  Save
+                </Button>
+                {data.anthropic_api_key_set && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => saveKey.mutate("")}
+                    disabled={saveKey.isPending}
+                  >
+                    Clear
+                  </Button>
+                )}
+              </div>
+              <p className="text-xs text-muted-foreground pt-2 border-t">
+                Stored encrypted at rest (Fernet, same as connection credentials) and used by{" "}
+                <a href="/chat" className="underline">Mel</a>, the chat assistant. Write-only — the
+                value is never shown again.
               </p>
             </CardContent>
           </Card>

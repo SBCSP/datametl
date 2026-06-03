@@ -357,12 +357,40 @@ export interface AppSettings {
   version: string;
   log_level: string;
   encryption_key_set: boolean;
+  anthropic_api_key_set: boolean;
   cors_origins: string[];
   redis_url_redacted: string;
   database_url_redacted: string;
   queue_depth: number;
   worker_max_jobs: number;
   worker_job_timeout_seconds: number;
+}
+
+// --- Chat ---
+
+export interface ChatMessage {
+  role: "user" | "assistant";
+  content: string;
+}
+export interface ChatModels {
+  models: string[];
+  default: string;
+}
+export interface ChatSessionSummary {
+  id: string;
+  title: string;
+  model: string;
+  message_count: number;
+  created_at: string;
+  updated_at: string;
+}
+export interface ChatSessionDetail {
+  id: string;
+  title: string;
+  model: string;
+  messages: ChatMessage[];
+  created_at: string;
+  updated_at: string;
 }
 export interface JobStatus {
   id: string;

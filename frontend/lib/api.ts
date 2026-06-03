@@ -9,6 +9,10 @@ import type {
   Mapping,
   ActivityEntry,
   AppSettings,
+  ChatMessage,
+  ChatModels,
+  ChatSessionDetail,
+  ChatSessionSummary,
   MigrationOptionsPayload,
   MigrationPreflightResponse,
   MigrationRun,
@@ -148,6 +152,55 @@ export const api = {
 
   // Settings
   getSettings: () => request<AppSettings>("/api/settings"),
+  updateAnthropicKey: (apiKey: string) =>
+    request<{ anthropic_api_key_set: boolean }>("/api/settings/anthropic-key", {
+      method: "PUT",
+      body: JSON.stringify({ api_key: apiKey }),
+    }),
+
+  // Chat
+  getChatModels: () => request<ChatModels>("/api/chat/models"),
+  listChatSessions: () => request<ChatSessionSummary[]>("/api/chat/sessions"),
+  getChatSession: (id: string) => request<ChatSessionDetail>(`/api/chat/sessions/${id}`),
+  createChatSession: (body: { title?: string | null; model: string; messages: ChatMessage[] }) =>
+    request<ChatSessionDetail>("/api/chat/sessions", { method: "POST", body: JSON.stringify(body) }),
+  updateChatSession: (
+    id: string,
+    body: { title?: string | null; model?: string | null; messages: ChatMessage[] },
+  ) =>
+    request<ChatSessionDetail>(`/api/chat/sessions/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+  deleteChatSession: (id: string) =>
+    request<void>(`/api/chat/sessions/${id}`, { method: "DELETE" }),
 };
+
+/** Stream a chat completion. Calls `onToken` with each text chunk as it arrives.
+ * Resolves when the stream ends; rejects (incl. AbortError) on transport failure. */
+export async function streamChat(
+  body: { model: string; messages: ChatMessage[] },
+  opts: { onToken: (chunk: string) => void; signal?: AbortSignal },
+): Promise<void> {
+  const res = await fetch(`${BASE}/api/chat/stream`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+    cache: "no-store",
+    signal: opts.signal,
+  });
+  if (!res.ok) throw new ApiError(res.status, await res.text());
+  if (!res.body) return;
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (value) opts.onToken(decoder.decode(value, { stream: true }));
+  }
+  const tail = decoder.decode();
+  if (tail) opts.onToken(tail);
+}
 
 export { ApiError };

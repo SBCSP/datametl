@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api import (
     activity,
+    chat,
     comparisons,
     connections,
     jobs,
@@ -42,6 +43,7 @@ app.include_router(mappings.router)
 app.include_router(migrations.router)
 app.include_router(verifications.router)
 app.include_router(sql_scripts.router)
+app.include_router(chat.router)
 app.include_router(activity.router)
 app.include_router(settings_api.router)
 app.include_router(jobs.router)

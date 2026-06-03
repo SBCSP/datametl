@@ -24,6 +24,8 @@ from app.models.verification_run_table import (  # noqa: E402, F401
     VerificationTableStatus,
 )
 from app.models.sql_script import SqlScript  # noqa: E402, F401
+from app.models.app_setting import AppSetting  # noqa: E402, F401
+from app.models.chat_session import ChatSession  # noqa: E402, F401
 
 __all__ = [
     "Base",
@@ -41,4 +43,6 @@ __all__ = [
     "VerificationRunTable",
     "VerificationTableStatus",
     "SqlScript",
+    "AppSetting",
+    "ChatSession",
 ]
