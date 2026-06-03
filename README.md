@@ -1,10 +1,10 @@
 # DataMETL
 
-A local-first data migration tool. The driving use case is migrating a **Supabase** database to vanilla **Postgres** (e.g. AWS RDS), with the architecture set up to extend to other engines later.
+A local-first database migration tool for **PostgreSQL** (including managed Postgres such as AWS RDS). Connect a source and destination, compare their schemas, map datatypes, move the data, and verify parity. The connector and introspection layers are **pluggable** — Postgres is supported today, and additional engines (MySQL is next) slot in without touching the rest of the app.
 
 It runs on your laptop, never sends your database credentials anywhere, and lets you:
 
-1. **Connect** to source + destination databases (Postgres today; pluggable for more).
+1. **Connect** to source + destination databases (Postgres today; more engines being added).
 2. **Introspect** each schema (tables, columns, datatypes, defaults, FKs, indexes, RLS policies, extensions).
 3. **Compare** source vs. destination side-by-side at the schema level — with per-schema scoping.
 4. **Map** datatypes from source to destination, with sensible defaults and per-column overrides.
@@ -61,7 +61,7 @@ git clone https://github.com/sbcsp/datametl.git && cd datametl
 cp .env.example .env
 make key                      # generate a Fernet key, paste into ENCRYPTION_KEY in .env
 
-make up-samples               # app + sample Supabase-flavored source + vanilla destination
+make up-samples               # app + sample source & destination Postgres databases
 make migrate                  # run alembic
 ```
 
