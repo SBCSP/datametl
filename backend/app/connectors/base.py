@@ -33,14 +33,15 @@ class Connector(ABC):
     def introspect(self) -> Schema: ...
 
     @abstractmethod
-    def run_readonly_statements(
-        self, statements: list[str], row_cap: int, timeout_s: int
+    def run_statements(
+        self, statements: list[str], row_cap: int, timeout_s: int, read_only: bool
     ) -> list[StatementResult]:
-        """Execute `statements` in a single read-only transaction and roll it back.
+        """Execute `statements` as a single transaction (atomic per connection).
 
-        Returns one StatementResult per statement attempted. Errors (including read-only
-        violations) are captured per statement, not raised; execution stops at the first
-        erroring statement. Implementations MUST NOT write to the database, and MUST NOT put
-        credentials / the DSN into any error string.
+        Returns one StatementResult per statement attempted; errors are captured per statement,
+        not raised, and execution stops at the first error. When `read_only` is True the
+        transaction is locked read-only and always rolled back. When False, the transaction
+        commits only if every statement succeeds; any error rolls the whole script back.
+        Implementations MUST NOT put credentials / the DSN into any error string.
         """
         ...

@@ -141,10 +141,10 @@ export const api = {
   updateScript: (id: string, body: { name?: string; content?: string }) =>
     request<SqlScript>(`/api/scripts/${id}`, { method: "PUT", body: JSON.stringify(body) }),
   deleteScript: (id: string) => request<void>(`/api/scripts/${id}`, { method: "DELETE" }),
-  runScript: (id: string, connectionIds: string[]) =>
+  runScript: (id: string, connectionIds: string[], allowWrites = false) =>
     request<JobEnqueued>(`/api/scripts/${id}/run`, {
       method: "POST",
-      body: JSON.stringify({ connection_ids: connectionIds }),
+      body: JSON.stringify({ connection_ids: connectionIds, allow_writes: allowWrites }),
     }),
 
   // Activity (unified runs feed)

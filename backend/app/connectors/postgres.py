@@ -98,19 +98,24 @@ class PostgresConnector(Connector):
     def introspect(self) -> Schema:
         return pg_introspect.introspect(self._engine())
 
-    def run_readonly_statements(
+    def run_statements(
         self,
         statements: list[str],
         row_cap: int = ROW_CAP,
         timeout_s: int = STATEMENT_TIMEOUT_S,
+        read_only: bool = True,
     ) -> list[StatementResult]:
         results: list[StatementResult] = []
+        errored = False
         eng = self._engine()
         with eng.connect() as conn:
-            # First commands in the transaction: lock it read-only (so any write/DDL fails with
-            # "cannot execute ... in a read-only transaction") and cap statement runtime. Both
-            # are rolled back at the end along with everything else.
-            conn.execute(text("SET TRANSACTION READ ONLY"))
+            # The whole script runs in one transaction (atomic per connection). In read-only mode
+            # we lock it (writes/DDL fail with "cannot execute ... in a read-only transaction")
+            # and roll back at the end. In write mode we commit only if every statement
+            # succeeds; any error rolls the whole script back. A statement_timeout caps runtime
+            # either way.
+            if read_only:
+                conn.execute(text("SET TRANSACTION READ ONLY"))
             conn.execute(text(f"SET statement_timeout = '{int(timeout_s)}s'"))
             for index, stmt in enumerate(statements):
                 started = time.perf_counter()
@@ -146,6 +151,11 @@ class PostgresConnector(Connector):
                             duration_ms=duration_ms, error=str(e.__cause__ or e),
                         )
                     )
+                    errored = True
                     break  # stop this connection's remaining statements on first error
-            conn.rollback()
+            # Read-only always rolls back. Write mode commits only on a clean, complete run.
+            if read_only or errored:
+                conn.rollback()
+            else:
+                conn.commit()
         return results

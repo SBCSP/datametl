@@ -29,6 +29,7 @@ export function ScriptEditor({ script }: { script?: SqlScript }) {
   const [name, setName] = useState(script?.name ?? "");
   const [content, setContent] = useState(script?.content ?? "");
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [allowWrites, setAllowWrites] = useState(false);
   const [jobId, setJobId] = useState<string | null>(null);
 
   const connections = useQuery({ queryKey: ["connections"], queryFn: api.listConnections });
@@ -60,7 +61,7 @@ export function ScriptEditor({ script }: { script?: SqlScript }) {
   const runMut = useMutation({
     mutationFn: async () => {
       const sid = await persist();
-      return api.runScript(sid, Array.from(selected));
+      return api.runScript(sid, Array.from(selected), allowWrites);
     },
     onSuccess: (r) => {
       qc.invalidateQueries({ queryKey: ["scripts"] });
@@ -100,7 +101,7 @@ export function ScriptEditor({ script }: { script?: SqlScript }) {
     <div>
       <PageHeader
         title={id ? "Edit script" : "New script"}
-        description="Write read-only SQL, then run it against one or many connections at once. Every statement runs inside a read-only transaction that is rolled back — writes and DDL fail safely."
+        description="Write SQL, then run it against one or many connections at once. Runs read-only by default (rolled back); enable “Allow writes” to commit updates/DDL — atomically per connection."
         breadcrumbs={[{ label: "SQL Scripts", href: "/scripts" }, { label: id ? name || "Script" : "New" }]}
         actions={
           <div className="flex gap-2">
@@ -112,9 +113,14 @@ export function ScriptEditor({ script }: { script?: SqlScript }) {
             <Button variant="outline" onClick={() => saveMut.mutate()} disabled={!name.trim() || saveMut.isPending}>
               <Save className="h-4 w-4 mr-1.5" /> Save
             </Button>
-            <Button onClick={() => runMut.mutate()} disabled={!canRun}>
+            <Button
+              variant={allowWrites ? "destructive" : "default"}
+              onClick={() => runMut.mutate()}
+              disabled={!canRun}
+            >
               {running ? <Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> : <Play className="h-4 w-4 mr-1.5" />}
-              Run{selected.size > 0 ? ` (${selected.size})` : ""}
+              {allowWrites ? "Run writes" : "Run"}
+              {selected.size > 0 ? ` (${selected.size})` : ""}
             </Button>
           </div>
         }
@@ -177,6 +183,23 @@ export function ScriptEditor({ script }: { script?: SqlScript }) {
                 </label>
               ))
             )}
+
+            {/* Write mode toggle */}
+            <label className="mt-2 flex items-start gap-2 rounded-md border border-dashed px-2 py-2 text-xs cursor-pointer">
+              <input
+                type="checkbox"
+                className="mt-0.5 h-4 w-4 accent-destructive"
+                checked={allowWrites}
+                onChange={(e) => setAllowWrites(e.target.checked)}
+              />
+              <span>
+                <span className="font-medium text-foreground">Allow writes (commits changes)</span>
+                <span className="mt-0.5 block text-muted-foreground">
+                  Off = read-only (rolled back). On = runs in a transaction and commits; rolls back
+                  if any statement fails. Applies to every selected connection.
+                </span>
+              </span>
+            </label>
           </CardContent>
         </Card>
       </div>

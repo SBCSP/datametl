@@ -125,14 +125,15 @@ async def run_verification(ctx: dict[str, Any], run_id: str) -> dict[str, Any]:
 
 
 async def execute_sql_script(
-    ctx: dict[str, Any], script_id: str, connection_ids: list[str]
+    ctx: dict[str, Any], script_id: str, connection_ids: list[str], read_only: bool = True
 ) -> dict[str, Any]:
-    """Run a saved SQL script (read-only) against each selected connection and collect results.
+    """Run a saved SQL script against each selected connection and collect results.
 
     Each connection runs in its own thread (the SQL is sync, like introspect) and is fully
     isolated: a connection that can't connect or hits an error becomes a failed entry in the
-    output rather than failing the whole run. Never writes — every statement executes inside a
-    read-only transaction that is rolled back (see PostgresConnector.run_readonly_statements).
+    output rather than failing the whole run. When `read_only` (the default) every statement
+    runs in a read-only transaction that is rolled back; when False, writes are allowed and the
+    script commits atomically per connection (see PostgresConnector.run_statements).
     """
     script_uuid = uuid.UUID(script_id)
 
@@ -164,7 +165,7 @@ async def execute_sql_script(
                     "error": "Connection not found", "statements": []}
         try:
             connector = for_engine(c["engine"], c["creds"])
-            stmts = connector.run_readonly_statements(statements, ROW_CAP, STATEMENT_TIMEOUT_S)
+            stmts = connector.run_statements(statements, ROW_CAP, STATEMENT_TIMEOUT_S, read_only)
             ok = all(s["error"] is None for s in stmts)
             return {"connection_id": c["id"], "connection_name": c["name"], "ok": ok,
                     "error": None, "statements": stmts}

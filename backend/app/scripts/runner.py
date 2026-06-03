@@ -1,9 +1,9 @@
 """Pure helpers for the SQL script runner.
 
-Kept free of any DB / connector imports so they're cheap to unit-test. The actual read-only
-execution lives in the connector layer (`PostgresConnector.run_readonly_statements`) because the
-read-only transaction SQL is engine-specific; this module only handles statement splitting and
-the row-cap / result shaping that the connector reuses.
+Kept free of any DB / connector imports so they're cheap to unit-test. The actual statement
+execution lives in the connector layer (`PostgresConnector.run_statements`) because the
+transaction SQL is engine-specific; this module only handles statement splitting and the
+row-cap / result shaping that the connector reuses.
 """
 from __future__ import annotations
 

@@ -93,6 +93,9 @@ async def run_script(
     if missing:
         raise HTTPException(404, f"Unknown connection(s): {', '.join(missing)}")
     job_id = await enqueue(
-        "execute_sql_script", str(script_id), [str(cid) for cid in payload.connection_ids]
+        "execute_sql_script",
+        str(script_id),
+        [str(cid) for cid in payload.connection_ids],
+        not payload.allow_writes,  # read_only
     )
     return JobEnqueued(job_id=job_id)

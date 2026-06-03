@@ -381,6 +381,7 @@ class SqlScriptRead(BaseModel):
 
 class SqlScriptRunRequest(BaseModel):
     connection_ids: list[uuid.UUID] = Field(min_length=1)
+    allow_writes: bool = False  # default read-only; opt in to commit writes/DDL
 
 
 class StatementResultRead(BaseModel):
