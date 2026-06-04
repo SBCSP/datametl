@@ -7,11 +7,13 @@ import {
   Activity,
   ArrowRightLeft,
   Bot,
+  CalendarClock,
   Database,
   FileCode,
   GitCompareArrows,
   History,
   LayoutDashboard,
+  Network,
   Settings,
   ShieldCheck,
   Workflow,
@@ -55,6 +57,8 @@ const NAV: { section: string; items: NavItem[] }[] = [
     items: [
       { href: "/chat", label: "Mel", icon: Bot, matchPrefix: "/chat" },
       { href: "/scripts", label: "SQL Scripts", icon: FileCode, matchPrefix: "/scripts" },
+      { href: "/pipelines", label: "Pipelines", icon: Network, matchPrefix: "/pipelines" },
+      { href: "/schedules", label: "Schedules", icon: CalendarClock, matchPrefix: "/schedules" },
     ],
   },
   {

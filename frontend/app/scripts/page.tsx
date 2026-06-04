@@ -3,8 +3,9 @@
 import Link from "next/link";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { FileCode, Plus, Trash2 } from "lucide-react";
+import { CalendarClock, FileCode, Plus, Trash2 } from "lucide-react";
 import { api } from "@/lib/api";
+import type { SqlScript } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -63,6 +64,9 @@ export default function ScriptsPage() {
               <TableHeader>
                 <TableRow>
                   <TableHead>Name</TableHead>
+                  <TableHead>Schedule</TableHead>
+                  <TableHead className="text-right">Runs</TableHead>
+                  <TableHead>Last run</TableHead>
                   <TableHead>Updated</TableHead>
                   <TableHead className="w-0" />
                 </TableRow>
@@ -74,6 +78,13 @@ export default function ScriptsPage() {
                       <Link href={`/scripts/${s.id}`} className="hover:underline">
                         {s.name}
                       </Link>
+                    </TableCell>
+                    <TableCell>
+                      <ScheduleIndicator script={s} />
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">{s.run_count}</TableCell>
+                    <TableCell className="text-muted-foreground whitespace-nowrap">
+                      {s.last_run_at ? new Date(s.last_run_at).toLocaleString() : "—"}
                     </TableCell>
                     <TableCell className="text-muted-foreground">
                       {new Date(s.updated_at).toLocaleString()}
@@ -99,5 +110,42 @@ export default function ScriptsPage() {
         </Card>
       )}
     </div>
+  );
+}
+
+/** Shows whether a script is on a schedule, plus the health of its most recent scheduled run.
+ * Links to /schedules so the operator can manage it. */
+function ScheduleIndicator({ script }: { script: SqlScript }) {
+  if (!script.is_scheduled) {
+    return <span className="text-muted-foreground">—</span>;
+  }
+
+  const status = script.last_scheduled_status;
+  const health =
+    status === "succeeded"
+      ? { dot: "bg-emerald-500", label: "succeeding", text: "text-emerald-600 dark:text-emerald-400" }
+      : status === "failed"
+        ? { dot: "bg-destructive", label: "failing", text: "text-destructive" }
+        : status === "partial"
+          ? { dot: "bg-amber-500", label: "partial", text: "text-amber-600 dark:text-amber-500" }
+          : status === "running"
+            ? { dot: "bg-sky-500 animate-pulse", label: "running", text: "text-muted-foreground" }
+            : { dot: "bg-muted-foreground/40", label: "no runs yet", text: "text-muted-foreground" };
+
+  return (
+    <Link
+      href="/schedules"
+      className="inline-flex items-center gap-1.5 text-xs hover:underline"
+      title={`On a schedule · last run: ${health.label}`}
+    >
+      <CalendarClock
+        className={`h-3.5 w-3.5 ${script.schedule_enabled ? "text-foreground" : "text-muted-foreground"}`}
+      />
+      <span className={script.schedule_enabled ? "" : "text-muted-foreground"}>
+        {script.schedule_enabled ? "Scheduled" : "Paused"}
+      </span>
+      <span className={`h-2 w-2 rounded-full ${health.dot}`} aria-hidden />
+      <span className={`${health.text}`}>{health.label}</span>
+    </Link>
   );
 }

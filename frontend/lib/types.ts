@@ -376,6 +376,11 @@ export interface ChatModels {
   models: string[];
   default: string;
 }
+export interface ActiveMcp {
+  connection_id: string;
+  name: string;
+  engine: string;
+}
 export interface ChatSessionSummary {
   id: string;
   title: string;
@@ -407,8 +412,14 @@ export interface SqlScript {
   id: string;
   name: string;
   content: string;
+  description: string;
+  run_count: number;
+  last_run_at: string | null;
   created_at: string;
   updated_at: string;
+  is_scheduled: boolean;
+  schedule_enabled: boolean;
+  last_scheduled_status: "running" | "succeeded" | "partial" | "failed" | null;
 }
 export interface StatementResult {
   index: number;
@@ -432,4 +443,125 @@ export interface ScriptRunResult {
   script_id: string;
   statement_count: number;
   connections: ConnectionRunResult[];
+}
+
+// --- Scheduled scripts (cron) ---
+
+export interface Schedule {
+  id: string;
+  name: string;
+  script_id: string;
+  script_name: string | null;
+  connection_ids: string[];
+  cron: string;
+  timezone: string;
+  allow_writes: boolean;
+  enabled: boolean;
+  last_run_at: string | null;
+  next_run_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+export interface ScheduleConnectionSummary {
+  connection_name: string | null;
+  ok: boolean;
+  error: string | null;
+  row_total: number;
+}
+export interface ScheduledRun {
+  id: string;
+  schedule_id: string;
+  status: "running" | "succeeded" | "partial" | "failed" | string;
+  error: string | null;
+  summary: ScheduleConnectionSummary[];
+  started_at: string;
+  finished_at: string | null;
+}
+export interface CronPreview {
+  valid: boolean;
+  error: string | null;
+  next_runs: string[];
+}
+
+// --- ETL Pipelines ---
+
+export type PipelineStepType = "sql" | "transfer";
+export type TransferMode = "truncate" | "append";
+
+export interface SqlStepConfig {
+  connection_id?: string;
+  script_id?: string;
+  inline_sql?: string;
+  allow_writes?: boolean;
+}
+export interface TransferStepConfig {
+  source_connection_id?: string;
+  source_script_id?: string;
+  source_sql?: string;
+  dest_connection_id?: string;
+  dest_table?: string;
+  dest_columns?: string[];
+  mode?: TransferMode;
+}
+export type StepConfig = Record<string, unknown>;
+
+export interface PipelineStepIO {
+  name: string;
+  step_type: PipelineStepType;
+  config: StepConfig;
+}
+export interface PipelineStepRead extends PipelineStepIO {
+  id: string;
+  step_order: number;
+}
+export interface Pipeline {
+  id: string;
+  name: string;
+  description: string;
+  steps: PipelineStepRead[];
+  created_at: string;
+  updated_at: string;
+}
+export interface PipelineSummary {
+  id: string;
+  name: string;
+  description: string;
+  step_count: number;
+  last_run_status: string | null;
+  last_run_at: string | null;
+  updated_at: string;
+}
+export interface PipelineRunStep {
+  id: string;
+  step_order: number;
+  name: string;
+  step_type: PipelineStepType;
+  status: "pending" | "running" | "succeeded" | "failed" | "skipped" | string;
+  summary: Record<string, unknown>;
+  error: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+}
+export interface PipelineRun {
+  id: string;
+  pipeline_id: string;
+  status: "pending" | "running" | "succeeded" | "failed" | string;
+  error: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+  created_at: string;
+  steps: PipelineRunStep[];
+}
+export interface PipelineRunSummary {
+  id: string;
+  pipeline_id: string;
+  status: string;
+  started_at: string | null;
+  finished_at: string | null;
+  step_count: number;
+  created_at: string;
+}
+export interface PipelineRunEnqueued {
+  run_id: string;
+  job_id: string;
 }

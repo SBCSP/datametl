@@ -9,6 +9,7 @@ import type {
   Mapping,
   ActivityEntry,
   AppSettings,
+  ActiveMcp,
   ChatMessage,
   ChatModels,
   ChatSessionDetail,
@@ -28,6 +29,15 @@ import type {
   Snapshot,
   SnapshotSummary,
   SqlScript,
+  Schedule,
+  ScheduledRun,
+  CronPreview,
+  Pipeline,
+  PipelineSummary,
+  PipelineStepIO,
+  PipelineRun,
+  PipelineRunSummary,
+  PipelineRunEnqueued,
   TestConnectionResult,
 } from "./types";
 
@@ -136,9 +146,9 @@ export const api = {
   // SQL scripts
   listScripts: () => request<SqlScript[]>("/api/scripts"),
   getScript: (id: string) => request<SqlScript>(`/api/scripts/${id}`),
-  createScript: (body: { name: string; content: string }) =>
+  createScript: (body: { name: string; content: string; description?: string }) =>
     request<SqlScript>("/api/scripts", { method: "POST", body: JSON.stringify(body) }),
-  updateScript: (id: string, body: { name?: string; content?: string }) =>
+  updateScript: (id: string, body: { name?: string; content?: string; description?: string }) =>
     request<SqlScript>(`/api/scripts/${id}`, { method: "PUT", body: JSON.stringify(body) }),
   deleteScript: (id: string) => request<void>(`/api/scripts/${id}`, { method: "DELETE" }),
   runScript: (id: string, connectionIds: string[], allowWrites = false) =>
@@ -146,6 +156,56 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ connection_ids: connectionIds, allow_writes: allowWrites }),
     }),
+
+  // Scheduled scripts (cron)
+  listSchedules: () => request<Schedule[]>("/api/schedules"),
+  getSchedule: (id: string) => request<Schedule>(`/api/schedules/${id}`),
+  createSchedule: (body: {
+    name?: string | null;
+    script_id: string;
+    connection_ids: string[];
+    cron: string;
+    timezone: string;
+    allow_writes: boolean;
+    enabled: boolean;
+  }) => request<Schedule>("/api/schedules", { method: "POST", body: JSON.stringify(body) }),
+  updateSchedule: (
+    id: string,
+    body: Partial<{
+      name: string | null;
+      script_id: string;
+      connection_ids: string[];
+      cron: string;
+      timezone: string;
+      allow_writes: boolean;
+      enabled: boolean;
+    }>,
+  ) => request<Schedule>(`/api/schedules/${id}`, { method: "PUT", body: JSON.stringify(body) }),
+  deleteSchedule: (id: string) => request<void>(`/api/schedules/${id}`, { method: "DELETE" }),
+  runScheduleNow: (id: string) =>
+    request<JobEnqueued>(`/api/schedules/${id}/run-now`, { method: "POST" }),
+  getScheduleRuns: (id: string) => request<ScheduledRun[]>(`/api/schedules/${id}/runs`),
+  previewCron: (cron: string, timezone: string) =>
+    request<CronPreview>("/api/schedules/preview", {
+      method: "POST",
+      body: JSON.stringify({ cron, timezone }),
+    }),
+
+  // ETL Pipelines
+  listPipelines: () => request<PipelineSummary[]>("/api/pipelines"),
+  getPipeline: (id: string) => request<Pipeline>(`/api/pipelines/${id}`),
+  createPipeline: (body: { name: string; description?: string; steps: PipelineStepIO[] }) =>
+    request<Pipeline>("/api/pipelines", { method: "POST", body: JSON.stringify(body) }),
+  updatePipeline: (
+    id: string,
+    body: { name?: string; description?: string; steps?: PipelineStepIO[] },
+  ) => request<Pipeline>(`/api/pipelines/${id}`, { method: "PUT", body: JSON.stringify(body) }),
+  deletePipeline: (id: string) => request<void>(`/api/pipelines/${id}`, { method: "DELETE" }),
+  runPipeline: (id: string) =>
+    request<PipelineRunEnqueued>(`/api/pipelines/${id}/runs`, { method: "POST" }),
+  getPipelineRun: (runId: string) => request<PipelineRun>(`/api/pipelines/runs/${runId}`),
+  listPipelineRuns: (id: string) =>
+    request<PipelineRunSummary[]>(`/api/pipelines/${id}/runs`),
 
   // Activity (unified runs feed)
   listActivity: () => request<ActivityEntry[]>("/api/activity"),
@@ -174,15 +234,25 @@ export const api = {
     }),
   deleteChatSession: (id: string) =>
     request<void>(`/api/chat/sessions/${id}`, { method: "DELETE" }),
+
+  // MCP (live read-only connection)
+  getActiveMcp: () => request<ActiveMcp | null>("/api/mcp/active"),
+  mcpActivate: (connectionId: string) =>
+    request<ActiveMcp>("/api/mcp/activate", {
+      method: "POST",
+      body: JSON.stringify({ connection_id: connectionId }),
+    }),
+  mcpDeactivate: () => request<void>("/api/mcp/deactivate", { method: "POST" }),
 };
 
-/** Stream a chat completion. Calls `onToken` with each text chunk as it arrives.
+/** POST `body` to `path` and pump the plain-text streaming response into `onToken`.
  * Resolves when the stream ends; rejects (incl. AbortError) on transport failure. */
-export async function streamChat(
-  body: { model: string; messages: ChatMessage[] },
+async function streamPost(
+  path: string,
+  body: unknown,
   opts: { onToken: (chunk: string) => void; signal?: AbortSignal },
 ): Promise<void> {
-  const res = await fetch(`${BASE}/api/chat/stream`, {
+  const res = await fetch(`${BASE}${path}`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
@@ -201,6 +271,22 @@ export async function streamChat(
   }
   const tail = decoder.decode();
   if (tail) opts.onToken(tail);
+}
+
+/** Stream a chat completion. Calls `onToken` with each text chunk as it arrives. */
+export function streamChat(
+  body: { model: string; messages: ChatMessage[] },
+  opts: { onToken: (chunk: string) => void; signal?: AbortSignal },
+): Promise<void> {
+  return streamPost("/api/chat/stream", body, opts);
+}
+
+/** Ask Mel to describe a SQL script, streaming the Markdown breakdown back token by token. */
+export function streamDescribeSql(
+  sql: string,
+  opts: { onToken: (chunk: string) => void; signal?: AbortSignal },
+): Promise<void> {
+  return streamPost("/api/chat/describe-sql", { sql }, opts);
 }
 
 export { ApiError };

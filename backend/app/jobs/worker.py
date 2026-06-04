@@ -3,14 +3,18 @@ from __future__ import annotations
 
 import logging
 
+from arq import cron
 from arq.connections import RedisSettings
 
 from app.config import settings
 from app.jobs.tasks import (
+    dispatch_due_schedules,
     execute_sql_script,
     introspect_connection,
     run_comparison,
     run_migration,
+    run_pipeline,
+    run_scheduled_script,
     run_verification,
 )
 
@@ -29,7 +33,18 @@ def _redis_settings() -> RedisSettings:
 
 
 class WorkerSettings:
-    functions = [introspect_connection, run_comparison, run_migration, run_verification, execute_sql_script]
+    functions = [
+        introspect_connection,
+        run_comparison,
+        run_migration,
+        run_verification,
+        execute_sql_script,
+        run_scheduled_script,
+        run_pipeline,
+    ]
+    # Fires every minute (at :00s) to enqueue any due scheduled scripts. The dispatcher itself
+    # is cheap (one indexed query); the actual runs go through run_scheduled_script.
+    cron_jobs = [cron(dispatch_due_schedules, second=0, run_at_startup=False)]
     redis_settings = _redis_settings()
     keep_result = 3600  # seconds — UI polls for status
     max_jobs = 4

@@ -13,22 +13,48 @@ from __future__ import annotations
 
 import asyncio
 import uuid
+from datetime import UTC, datetime
 from typing import Any
 
+from sqlalchemy import func, select, update
+
+from app.comparison import diff_schemas
 from app.connectors import for_engine
 from app.crypto import vault
 from app.db import SessionLocal
+from app.introspection.normalized import Schema
+from app.mapping import seed_mappings_for_comparison
+from app.migrations.runner import execute_run as execute_migration_run
 from app.models.comparison import Comparison
 from app.models.connection import Connection
+from app.models.scheduled_script import ScheduledRun, ScheduledScript
 from app.models.schema_snapshot import SchemaSnapshot
 from app.models.sql_script import SqlScript
-from app.scripts.runner import ROW_CAP, STATEMENT_TIMEOUT_S, split_statements
 from app.recipes.supabase import analyze as analyze_supabase
-from app.comparison import diff_schemas
-from app.mapping import seed_mappings_for_comparison
-from app.introspection.normalized import Schema
-from app.migrations.runner import execute_run as execute_migration_run
+from app.scheduling.cron import next_run as cron_next_run
+from app.scripts.exec_core import run_against_connections
+from app.scripts.runner import split_statements
 from app.verification_runs.runner import execute_run as execute_verification_run
+
+
+def _load_connections(db: Any, connection_ids: list[str]) -> list[dict[str, Any]]:
+    """Decrypt the chosen connections into plain dicts for the execution core.
+
+    A missing connection (deleted between save and run) becomes a marker dict so it surfaces
+    as one failed entry instead of aborting the run."""
+    conns: list[dict[str, Any]] = []
+    for cid in (uuid.UUID(c) for c in connection_ids):
+        conn = db.get(Connection, cid)
+        if conn is None:
+            conns.append({"id": str(cid), "name": "(deleted connection)", "engine": None, "creds": None})
+        else:
+            conns.append({
+                "id": str(conn.id),
+                "name": conn.name,
+                "engine": conn.engine,
+                "creds": vault.decrypt(conn.encrypted_credentials),
+            })
+    return conns
 
 
 async def introspect_connection(ctx: dict[str, Any], connection_id: str) -> dict[str, Any]:
@@ -124,6 +150,20 @@ async def run_verification(ctx: dict[str, Any], run_id: str) -> dict[str, Any]:
     return await asyncio.to_thread(_run)
 
 
+async def run_pipeline(ctx: dict[str, Any], run_id: str) -> dict[str, Any]:
+    """Execute a previously-created PipelineRun. The steps are sync (psycopg COPY / SQL), so
+    offload to a thread like the migration runner."""
+    from app.etl.runner import execute_pipeline_run
+
+    run_uuid = uuid.UUID(run_id)
+
+    def _run() -> dict[str, Any]:
+        with SessionLocal() as db:
+            return execute_pipeline_run(db, run_uuid)
+
+    return await asyncio.to_thread(_run)
+
+
 async def execute_sql_script(
     ctx: dict[str, Any], script_id: str, connection_ids: list[str], read_only: bool = True
 ) -> dict[str, Any]:
@@ -146,38 +186,136 @@ async def execute_sql_script(
             raise ValueError(f"Unknown script: {script_id}")
         statements = split_statements(script.content)
 
-        conns: list[dict[str, Any]] = []
-        for cid in (uuid.UUID(c) for c in connection_ids):
-            conn = db.get(Connection, cid)
-            if conn is None:
-                conns.append({"id": str(cid), "name": "(deleted connection)", "engine": None, "creds": None})
-            else:
-                conns.append({
-                    "id": str(conn.id),
-                    "name": conn.name,
-                    "engine": conn.engine,
-                    "creds": vault.decrypt(conn.encrypted_credentials),
-                })
+        # Record this run (atomic increment + last-run stamp) so /scripts can show usage.
+        db.execute(
+            update(SqlScript)
+            .where(SqlScript.id == script_uuid)
+            .values(run_count=SqlScript.run_count + 1, last_run_at=func.now())
+        )
+        db.commit()
 
-    def _run_one(c: dict[str, Any]) -> dict[str, Any]:
-        if c["engine"] is None:
-            return {"connection_id": c["id"], "connection_name": c["name"], "ok": False,
-                    "error": "Connection not found", "statements": []}
-        try:
-            connector = for_engine(c["engine"], c["creds"])
-            stmts = connector.run_statements(statements, ROW_CAP, STATEMENT_TIMEOUT_S, read_only)
-            ok = all(s["error"] is None for s in stmts)
-            return {"connection_id": c["id"], "connection_name": c["name"], "ok": ok,
-                    "error": None, "statements": stmts}
-        except Exception as e:  # connection-level failure, isolate per connection
-            # str(e.__cause__ or e) mirrors test_connection: surfaces the psycopg message
-            # (host/port/db/user) without the password, which psycopg never includes.
-            return {"connection_id": c["id"], "connection_name": c["name"], "ok": False,
-                    "error": str(getattr(e, "__cause__", None) or e), "statements": []}
+        conns = _load_connections(db, connection_ids)
 
-    results = await asyncio.gather(*[asyncio.to_thread(_run_one, c) for c in conns])
+    results = await run_against_connections(conns, statements, read_only)
     return {
         "script_id": script_id,
         "statement_count": len(statements),
-        "connections": list(results),
+        "connections": results,
     }
+
+
+def _summarize_connection(conn_result: dict[str, Any]) -> dict[str, Any]:
+    """Compact a full per-connection result down to what scheduled-run history stores:
+    name + ok + first error + total rows across all statements (no result rows)."""
+    statements = conn_result.get("statements") or []
+    row_total = sum(int(s.get("row_count") or 0) for s in statements)
+    error = conn_result.get("error")
+    if error is None:
+        first_err = next((s.get("error") for s in statements if s.get("error")), None)
+        error = first_err
+    return {
+        "connection_name": conn_result.get("connection_name"),
+        "ok": bool(conn_result.get("ok")),
+        "error": error,
+        "row_total": row_total,
+    }
+
+
+async def dispatch_due_schedules(ctx: dict[str, Any]) -> dict[str, Any]:
+    """Arq cron entrypoint (runs every minute): enqueue any enabled schedule that is due.
+
+    For each due schedule we advance `next_run_at` to the next future occurrence *before*
+    enqueuing, so a worker that was down for a while fires each schedule at most once on
+    recovery instead of replaying every missed minute. The actual run happens in
+    `run_scheduled_script`.
+    """
+    from app.jobs.queue import enqueue  # local import avoids a cycle at module load
+
+    now = datetime.now(UTC)
+    due_ids: list[str] = []
+    with SessionLocal() as db:
+        rows = list(
+            db.execute(
+                select(ScheduledScript).where(
+                    ScheduledScript.enabled.is_(True),
+                    ScheduledScript.next_run_at.is_not(None),
+                    ScheduledScript.next_run_at <= now,
+                )
+            ).scalars()
+        )
+        for sched in rows:
+            try:
+                upcoming = cron_next_run(sched.cron, sched.timezone, after=now)
+            except Exception:
+                # A malformed cron/tz shouldn't wedge the dispatcher; disable it so it stops
+                # matching and the user can fix it.
+                sched.enabled = False
+                continue
+            sched.last_run_at = now
+            sched.next_run_at = upcoming
+            due_ids.append(str(sched.id))
+        db.commit()
+
+    for sid in due_ids:
+        await enqueue("run_scheduled_script", sid)
+    return {"dispatched": len(due_ids)}
+
+
+async def run_scheduled_script(ctx: dict[str, Any], schedule_id: str) -> dict[str, Any]:
+    """Execute one scheduled script run and persist a compact history record.
+
+    Reuses the same execution core as the manual runner (read-only unless the schedule opts
+    into writes). A `ScheduledRun` row is created up front (status=running) and finalized with
+    a per-connection summary so the UI can show what each overnight run did.
+    """
+    sched_uuid = uuid.UUID(schedule_id)
+
+    with SessionLocal() as db:
+        sched = db.get(ScheduledScript, sched_uuid)
+        if sched is None:
+            raise ValueError(f"Unknown schedule: {schedule_id}")
+        script = db.get(SqlScript, sched.script_id)
+        if script is None:
+            raise ValueError(f"Schedule {schedule_id} references a missing script")
+        statements = split_statements(script.content)
+        read_only = not sched.allow_writes
+        connection_ids = [str(c) for c in sched.connection_ids]
+
+        run = ScheduledRun(schedule_id=sched.id, status="running", summary=[])
+        db.add(run)
+
+        # A scheduled run counts as a run of the underlying script.
+        db.execute(
+            update(SqlScript)
+            .where(SqlScript.id == sched.script_id)
+            .values(run_count=SqlScript.run_count + 1, last_run_at=func.now())
+        )
+        db.commit()
+        run_id = run.id
+        conns = _load_connections(db, connection_ids)
+
+    error: str | None = None
+    summary: list[dict[str, Any]] = []
+    try:
+        results = await run_against_connections(conns, statements, read_only)
+        summary = [_summarize_connection(r) for r in results]
+        oks = [s["ok"] for s in summary]
+        if all(oks):
+            status_str = "succeeded"
+        elif any(oks):
+            status_str = "partial"
+        else:
+            status_str = "failed"
+    except Exception as e:  # whole-run failure (should be rare; per-conn errors are isolated)
+        status_str = "failed"
+        error = str(getattr(e, "__cause__", None) or e)
+
+    with SessionLocal() as db:
+        db.execute(
+            update(ScheduledRun)
+            .where(ScheduledRun.id == run_id)
+            .values(status=status_str, summary=summary, error=error, finished_at=func.now())
+        )
+        db.commit()
+
+    return {"schedule_id": schedule_id, "run_id": str(run_id), "status": status_str}

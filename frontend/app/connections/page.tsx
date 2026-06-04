@@ -43,6 +43,24 @@ export default function ConnectionsPage() {
     onError: (e) => toast.error(String(e)),
   });
 
+  const mcpActive = useQuery({
+    queryKey: ["mcp-active"],
+    queryFn: api.getActiveMcp,
+    refetchInterval: 5_000,
+  });
+  const activeId = mcpActive.data?.connection_id ?? null;
+  const mcpMut = useMutation({
+    mutationFn: async (id: string | null) => {
+      if (id) await api.mcpActivate(id);
+      else await api.mcpDeactivate();
+    },
+    onSuccess: (_r, id) => {
+      qc.invalidateQueries({ queryKey: ["mcp-active"] });
+      toast.success(id ? "MCP connection activated — read-only" : "MCP connection deactivated");
+    },
+    onError: (e) => toast.error(String(e)),
+  });
+
   return (
     <div>
       <PageHeader
@@ -75,11 +93,14 @@ export default function ConnectionsPage() {
               </TableHeader>
               <TableBody>
                 {data.map((c) => (
-                  <TableRow key={c.id}>
+                  <TableRow key={c.id} className={activeId === c.id ? "bg-orange-500/5" : ""}>
                     <TableCell className="font-medium">
                       <Link href={`/schemas/${c.id}`} className="hover:underline">
                         {c.name}
                       </Link>
+                      {activeId === c.id && (
+                        <Badge variant="warning" className="ml-2 align-middle">Active MCP</Badge>
+                      )}
                     </TableCell>
                     <TableCell>
                       <Badge variant="secondary">{c.engine}</Badge>
@@ -88,6 +109,26 @@ export default function ConnectionsPage() {
                       {new Date(c.created_at).toLocaleString()}
                     </TableCell>
                     <TableCell className="text-right space-x-2">
+                      {activeId === c.id ? (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="border-orange-500/50 text-orange-600 hover:text-orange-700"
+                          onClick={() => mcpMut.mutate(null)}
+                          disabled={mcpMut.isPending}
+                        >
+                          Deactivate MCP
+                        </Button>
+                      ) : (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => mcpMut.mutate(c.id)}
+                          disabled={mcpMut.isPending}
+                        >
+                          Activate MCP
+                        </Button>
+                      )}
                       <Button
                         size="sm"
                         variant="outline"

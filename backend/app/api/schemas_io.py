@@ -11,7 +11,6 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-
 # --- Connection ---
 
 class PostgresCredentials(BaseModel):
@@ -52,7 +51,9 @@ class RedactedPostgresCredentials(BaseModel):
 
 class ConnectionCreate(BaseModel):
     name: str = Field(min_length=1, max_length=255)
-    engine: Literal["postgres"]
+    engine: Literal["postgres", "mysql"]
+    # Postgres + MySQL credentials are structurally identical (host/port/database/user/password
+    # + optional sslmode/sslrootcert), so one model serves both; the connector interprets SSL.
     credentials: PostgresCredentials
 
 
@@ -364,19 +365,28 @@ class ActivityEntry(BaseModel):
 class SqlScriptCreate(BaseModel):
     name: str = Field(min_length=1, max_length=255)
     content: str = ""
+    description: str = ""
 
 
 class SqlScriptUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=255)
     content: str | None = None
+    description: str | None = None
 
 
 class SqlScriptRead(BaseModel):
     id: uuid.UUID
     name: str
     content: str
+    description: str = ""
+    run_count: int = 0
+    last_run_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
+    # Schedule indicators (populated by the list endpoint; default off elsewhere).
+    is_scheduled: bool = False  # at least one schedule references this script
+    schedule_enabled: bool = False  # at least one *enabled* schedule references it
+    last_scheduled_status: str | None = None  # status of the most recent scheduled run
 
 
 class SqlScriptRunRequest(BaseModel):
@@ -456,6 +466,13 @@ class ChatModelsResponse(BaseModel):
     default: str
 
 
+class DescribeSqlRequest(BaseModel):
+    """Ask Mel to write a description of a SQL script (for the Scripts editor)."""
+
+    sql: str
+    model: str | None = None  # defaults server-side
+
+
 class ChatSessionCreate(BaseModel):
     title: str | None = None  # derived from the first user message when blank
     model: str
@@ -484,3 +501,161 @@ class ChatSessionRead(BaseModel):
     messages: list[ChatMessageIn]
     created_at: datetime
     updated_at: datetime
+
+
+# --- MCP (live read-only connection) ---
+
+class McpActivateRequest(BaseModel):
+    connection_id: uuid.UUID
+
+
+class McpActiveResponse(BaseModel):
+    connection_id: uuid.UUID
+    name: str
+    engine: str
+
+
+# --- Scheduled scripts (cron) ---
+
+class ScheduleCreate(BaseModel):
+    name: str | None = Field(default=None, max_length=255)  # defaults to the script's name
+    script_id: uuid.UUID
+    connection_ids: list[uuid.UUID] = Field(min_length=1)
+    cron: str = Field(min_length=1, max_length=255)
+    timezone: str = "UTC"
+    allow_writes: bool = False
+    enabled: bool = True
+
+
+class ScheduleUpdate(BaseModel):
+    name: str | None = Field(default=None, max_length=255)
+    script_id: uuid.UUID | None = None
+    connection_ids: list[uuid.UUID] | None = Field(default=None, min_length=1)
+    cron: str | None = Field(default=None, min_length=1, max_length=255)
+    timezone: str | None = None
+    allow_writes: bool | None = None
+    enabled: bool | None = None
+
+
+class ScheduleRead(BaseModel):
+    id: uuid.UUID
+    name: str
+    script_id: uuid.UUID
+    script_name: str | None = None
+    connection_ids: list[uuid.UUID]
+    cron: str
+    timezone: str
+    allow_writes: bool
+    enabled: bool
+    last_run_at: datetime | None = None
+    next_run_at: datetime | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class ScheduledRunRead(BaseModel):
+    id: uuid.UUID
+    schedule_id: uuid.UUID
+    status: str
+    error: str | None = None
+    summary: list[dict[str, Any]] = Field(default_factory=list)
+    started_at: datetime
+    finished_at: datetime | None = None
+
+
+class CronPreviewRequest(BaseModel):
+    cron: str
+    timezone: str = "UTC"
+
+
+class CronPreviewResponse(BaseModel):
+    valid: bool
+    error: str | None = None
+    next_runs: list[datetime] = Field(default_factory=list)
+
+
+# --- ETL Pipelines ---
+
+class PipelineStepIO(BaseModel):
+    """A step as authored in the builder. `config` is type-specific (see PipelineStep model)."""
+
+    name: str = Field(default="", max_length=255)
+    step_type: Literal["sql", "transfer"]
+    config: dict[str, Any] = Field(default_factory=dict)
+
+
+class PipelineCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=255)
+    description: str = ""
+    steps: list[PipelineStepIO] = Field(default_factory=list)
+
+
+class PipelineUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=255)
+    description: str | None = None
+    steps: list[PipelineStepIO] | None = None  # when present, replaces all steps
+
+
+class PipelineStepRead(BaseModel):
+    id: uuid.UUID
+    step_order: int
+    name: str
+    step_type: str
+    config: dict[str, Any]
+
+
+class PipelineRead(BaseModel):
+    id: uuid.UUID
+    name: str
+    description: str
+    steps: list[PipelineStepRead] = Field(default_factory=list)
+    created_at: datetime
+    updated_at: datetime
+
+
+class PipelineSummary(BaseModel):
+    id: uuid.UUID
+    name: str
+    description: str
+    step_count: int
+    last_run_status: str | None = None
+    last_run_at: datetime | None = None
+    updated_at: datetime
+
+
+class PipelineRunEnqueued(BaseModel):
+    run_id: uuid.UUID
+    job_id: str
+
+
+class PipelineRunStepRead(BaseModel):
+    id: uuid.UUID
+    step_order: int
+    name: str
+    step_type: str
+    status: str
+    summary: dict[str, Any] = Field(default_factory=dict)
+    error: str | None = None
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+
+
+class PipelineRunRead(BaseModel):
+    id: uuid.UUID
+    pipeline_id: uuid.UUID
+    status: str
+    error: str | None = None
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    created_at: datetime
+    steps: list[PipelineRunStepRead] = Field(default_factory=list)
+
+
+class PipelineRunSummary(BaseModel):
+    id: uuid.UUID
+    pipeline_id: uuid.UUID
+    status: str
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    step_count: int
+    created_at: datetime

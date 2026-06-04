@@ -1,13 +1,14 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { CheckCircle2, Loader2, Play, Save, Trash2, XCircle } from "lucide-react";
-import { api } from "@/lib/api";
+import { CheckCircle2, Loader2, Pencil, Play, Save, Sparkles, Trash2, XCircle } from "lucide-react";
+import { api, streamDescribeSql } from "@/lib/api";
 import type { ConnectionRunResult, ScriptRunResult, SqlScript, StatementResult } from "@/lib/types";
 import { useJob } from "@/lib/use-job";
+import { Markdown } from "@/components/markdown";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -27,10 +28,47 @@ export function ScriptEditor({ script }: { script?: SqlScript }) {
 
   const [id, setId] = useState<string | null>(script?.id ?? null);
   const [name, setName] = useState(script?.name ?? "");
+  const [description, setDescription] = useState(script?.description ?? "");
+  const [editingDesc, setEditingDesc] = useState(false);
+  const [descSnapshot, setDescSnapshot] = useState(script?.description ?? "");
+  const [generating, setGenerating] = useState(false);
+  const genAbort = useRef<AbortController | null>(null);
   const [content, setContent] = useState(script?.content ?? "");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [allowWrites, setAllowWrites] = useState(false);
   const [jobId, setJobId] = useState<string | null>(null);
+
+  // Abort any in-flight description generation if the editor unmounts.
+  useEffect(() => () => genAbort.current?.abort(), []);
+
+  // Read the current SQL and let Mel stream a description into the field (edit mode, so the
+  // operator reviews/tweaks before saving).
+  async function generateDescription() {
+    if (!content.trim()) {
+      toast.error("Write some SQL first — there's nothing to describe.");
+      return;
+    }
+    genAbort.current?.abort();
+    const ctrl = new AbortController();
+    genAbort.current = ctrl;
+    setDescSnapshot(description);
+    setDescription("");
+    setEditingDesc(true);
+    setGenerating(true);
+    try {
+      await streamDescribeSql(content, {
+        signal: ctrl.signal,
+        onToken: (chunk) => setDescription((prev) => prev + chunk),
+      });
+    } catch (e) {
+      if ((e as Error)?.name !== "AbortError") {
+        toast.error(`Mel couldn't generate a description: ${String(e)}`);
+        setDescription(descSnapshot); // restore on failure
+      }
+    } finally {
+      setGenerating(false);
+    }
+  }
 
   const connections = useQuery({ queryKey: ["connections"], queryFn: api.listConnections });
   const job = useJob(jobId);
@@ -38,15 +76,18 @@ export function ScriptEditor({ script }: { script?: SqlScript }) {
   // Create-or-update, returning the persisted id. Run/Save both go through this.
   const persist = async (): Promise<string> => {
     if (!name.trim()) throw new Error("Give the script a name first");
-    if (id) {
-      await api.updateScript(id, { name, content });
-      return id;
+    const saved = id
+      ? await api.updateScript(id, { name, content, description })
+      : await api.createScript({ name, content, description });
+    if (!id) {
+      setId(saved.id);
+      // Make the URL shareable without remounting (which would drop selection / job state).
+      window.history.replaceState(null, "", `/scripts/${saved.id}`);
     }
-    const created = await api.createScript({ name, content });
-    setId(created.id);
-    // Make the URL shareable without remounting (which would drop selection / job state).
-    window.history.replaceState(null, "", `/scripts/${created.id}`);
-    return created.id;
+    // Keep the detail query cache in sync so navigating back to this script shows the saved
+    // values instead of the pre-edit copy the editor would otherwise re-seed from.
+    qc.setQueryData(["script", saved.id], saved);
+    return saved.id;
   };
 
   const saveMut = useMutation({
@@ -137,6 +178,104 @@ export function ScriptEditor({ script }: { script?: SqlScript }) {
               value={name}
               onChange={(e) => setName(e.target.value)}
             />
+          </div>
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between">
+              <Label htmlFor="script-description">Description</Label>
+              <div className="flex items-center gap-1">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 px-2 text-xs"
+                  onClick={generateDescription}
+                  disabled={generating || !content.trim()}
+                  title="Read the current SQL and let Mel write a description"
+                >
+                  {generating ? (
+                    <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
+                  ) : (
+                    <Sparkles className="h-3.5 w-3.5 mr-1" />
+                  )}
+                  {generating ? "Generating…" : "Generate with Mel"}
+                </Button>
+                {!editingDesc && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 px-2 text-xs"
+                    onClick={() => {
+                      setDescSnapshot(description);
+                      setEditingDesc(true);
+                    }}
+                  >
+                    <Pencil className="h-3.5 w-3.5 mr-1" /> Edit
+                  </Button>
+                )}
+              </div>
+            </div>
+
+            {editingDesc ? (
+              <div className="space-y-2">
+                <Textarea
+                  id="script-description"
+                  className="min-h-[6rem] text-sm leading-relaxed"
+                  placeholder="What does this script do? Markdown supported (headings, lists, **bold**, `code`)."
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  autoFocus
+                />
+                <div className="flex items-center gap-2">
+                  <Button
+                    size="sm"
+                    disabled={generating}
+                    onClick={() => {
+                      setEditingDesc(false);
+                      // Persist immediately when the script already exists; for a brand-new,
+                      // unsaved script just render it and let the big Save commit everything.
+                      if (id && name.trim()) saveMut.mutate();
+                    }}
+                  >
+                    <Save className="h-3.5 w-3.5 mr-1" /> Save description
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      genAbort.current?.abort(); // stop streaming if mid-generation
+                      setDescription(descSnapshot);
+                      setEditingDesc(false);
+                    }}
+                  >
+                    Cancel
+                  </Button>
+                  {generating && (
+                    <span className="text-xs text-muted-foreground">Mel is writing…</span>
+                  )}
+                </div>
+              </div>
+            ) : description.trim() ? (
+              <div
+                className="rounded-md border bg-muted/30 px-3 py-2"
+                onDoubleClick={() => {
+                  setDescSnapshot(description);
+                  setEditingDesc(true);
+                }}
+                title="Double-click to edit"
+              >
+                <Markdown>{description}</Markdown>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => {
+                  setDescSnapshot(description);
+                  setEditingDesc(true);
+                }}
+                className="w-full rounded-md border border-dashed px-3 py-3 text-left text-sm text-muted-foreground hover:bg-accent hover:text-foreground"
+              >
+                Add a description…
+              </button>
+            )}
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="script-sql">SQL</Label>

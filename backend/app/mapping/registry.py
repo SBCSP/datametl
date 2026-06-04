@@ -30,6 +30,28 @@ _DEFAULT_DEST_NATIVE: dict[tuple[str, NormalizedType], str] = {
     ("postgres", "enum"): "text",
     ("postgres", "geometry"): "geometry",
     ("postgres", "unknown"): "text",
+    # MySQL destination defaults (used when comparing into a MySQL target). Data migration
+    # between engines is not wired yet; these keep cross-engine comparison/mapping sensible.
+    ("mysql", "string"): "TEXT",
+    ("mysql", "int16"): "SMALLINT",
+    ("mysql", "int32"): "INT",
+    ("mysql", "int64"): "BIGINT",
+    ("mysql", "float32"): "FLOAT",
+    ("mysql", "float64"): "DOUBLE",
+    ("mysql", "decimal"): "DECIMAL",
+    ("mysql", "boolean"): "TINYINT(1)",
+    ("mysql", "uuid"): "CHAR(36)",
+    ("mysql", "json"): "JSON",
+    ("mysql", "binary"): "BLOB",
+    ("mysql", "date"): "DATE",
+    ("mysql", "time"): "TIME",
+    ("mysql", "timestamp"): "DATETIME",
+    ("mysql", "timestamptz"): "DATETIME",
+    ("mysql", "interval"): "VARCHAR(64)",
+    ("mysql", "array"): "JSON",
+    ("mysql", "enum"): "TEXT",
+    ("mysql", "geometry"): "GEOMETRY",
+    ("mysql", "unknown"): "TEXT",
 }
 
 

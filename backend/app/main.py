@@ -12,11 +12,16 @@ from app.api import (
     connections,
     jobs,
     mappings,
+    mcp,
     migrations,
-    settings as settings_api,
+    pipelines,
+    schedules,
     snapshots,
     sql_scripts,
     verifications,
+)
+from app.api import (
+    settings as settings_api,
 )
 from app.config import settings
 
@@ -43,7 +48,10 @@ app.include_router(mappings.router)
 app.include_router(migrations.router)
 app.include_router(verifications.router)
 app.include_router(sql_scripts.router)
+app.include_router(schedules.router)
+app.include_router(pipelines.router)
 app.include_router(chat.router)
+app.include_router(mcp.router)
 app.include_router(activity.router)
 app.include_router(settings_api.router)
 app.include_router(jobs.router)
