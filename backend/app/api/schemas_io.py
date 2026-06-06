@@ -313,6 +313,8 @@ class MigrationRunSummary(BaseModel):
     id: uuid.UUID
     comparison_id: uuid.UUID
     status: str
+    source_connection: str | None = None
+    dest_connection: str | None = None
     started_at: datetime | None = None
     finished_at: datetime | None = None
     table_count: int
@@ -524,10 +526,12 @@ class MetricsTotals(BaseModel):
     scripts: int
     pipelines: int
     schedules: int
+    taps: int = 0
     migration_runs: int
     verification_runs: int
     pipeline_runs: int
     scheduled_runs: int
+    tap_runs: int = 0
 
 
 class MetricsSeriesPoint(BaseModel):
@@ -538,6 +542,7 @@ class MetricsSeriesPoint(BaseModel):
     verification: int = 0
     pipeline: int = 0
     scheduled: int = 0
+    api_fetch: int = 0
 
 
 class MetricsResponse(BaseModel):
@@ -624,6 +629,9 @@ class SettingsResponse(BaseModel):
     queue_depth: int
     worker_max_jobs: int
     worker_job_timeout_seconds: int
+    auth_enabled: bool = False
+    auth_username: str | None = None
+    auth_token_ttl_hours: int = 0
 
 
 class AnthropicKeyUpdate(BaseModel):

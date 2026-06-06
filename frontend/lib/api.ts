@@ -82,6 +82,10 @@ import { clearToken, getToken } from "./auth";
 
 const BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
 
+/** The backend origin the browser should hit (e.g. http://localhost:8001 in dev). Empty when the
+ * app is served same-origin (k8s) and the API is reached via the /api/* proxy. */
+export const apiBaseUrl = BASE;
+
 class ApiError extends Error {
   constructor(public status: number, public body: string) {
     super(`API ${status}: ${body}`);

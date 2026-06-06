@@ -58,6 +58,9 @@ async def get_settings(db: Session = Depends(get_db)) -> SettingsResponse:
         queue_depth=await _queue_depth(),
         worker_max_jobs=getattr(WorkerSettings, "max_jobs", 4),
         worker_job_timeout_seconds=getattr(WorkerSettings, "job_timeout", 1800),
+        auth_enabled=cfg.auth_enabled,
+        auth_username=cfg.auth_username,
+        auth_token_ttl_hours=cfg.auth_token_ttl_hours,
     )
 
 

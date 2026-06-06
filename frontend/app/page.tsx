@@ -122,7 +122,7 @@ export default function DashboardPage() {
       />
 
       {/* Stat cards */}
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-5">
         <StatCard
           title="Connections"
           value={t?.connections}
@@ -150,6 +150,15 @@ export default function DashboardPage() {
           subtitle="ETL jobs"
           spark={sparkOf("pipeline")}
           sparkColor="#06b6d4"
+        />
+        <StatCard
+          title="Taps"
+          value={t?.taps}
+          icon={Radio}
+          href="/taps"
+          subtitle={`${t?.tap_runs ?? 0} fetches`}
+          spark={sparkOf("api_fetch")}
+          sparkColor="#f97316"
         />
         <StatCard
           title="Schedules"

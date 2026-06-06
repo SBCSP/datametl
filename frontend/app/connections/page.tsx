@@ -100,7 +100,7 @@ export default function ConnectionsPage() {
                   <TableRow
                     key={c.id}
                     className={cn(
-                      env && `border-l-4 ${env.border}`,
+                      env && `border-l-2 ${env.border}`,
                       activeId === c.id && "bg-orange-500/5",
                     )}
                   >
@@ -110,6 +110,7 @@ export default function ConnectionsPage() {
                       </Link>
                       {env && (
                         <Badge variant="outline" className={cn("ml-2 align-middle", env.badge)}>
+                          <span className={cn("h-1.5 w-1.5 rounded-full", env.dot)} />
                           {env.label}
                         </Badge>
                       )}

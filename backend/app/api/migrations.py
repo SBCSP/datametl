@@ -23,6 +23,7 @@ from app.migrations.planner import TableOption, TableOptionsPayload, build_plan
 from app.migrations.pre_flight import run_preflight
 from app.migrations.runner import create_run
 from app.models.comparison import Comparison
+from app.models.connection import Connection
 from app.models.migration_run import MigrationRun, MigrationRunStatus
 from app.models.migration_run_table import MigrationRunTable, TableRunStatus
 from app.models.schema_snapshot import SchemaSnapshot
@@ -38,7 +39,7 @@ def _to_planner(payload: MigrationOptionsPayload) -> TableOptionsPayload:
                 source_table=t.source_table,
                 dest_table=t.dest_table,
                 include=t.include,
-                conflict_mode=t.conflict_mode,  # type: ignore[arg-type]
+                conflict_mode=t.conflict_mode,
                 verification=t.verification,
             )
             for t in payload.tables
@@ -86,19 +87,46 @@ async def create_migration_run(
 
 @router.get("/runs", response_model=list[MigrationRunSummary])
 def list_runs(db: Session = Depends(get_db)) -> list[MigrationRunSummary]:
-    rows = db.execute(select(MigrationRun).order_by(MigrationRun.created_at.desc())).scalars()
+    rows = list(db.execute(select(MigrationRun).order_by(MigrationRun.created_at.desc())).scalars())
+
+    # Resolve each run's source/dest databases (run → comparison → snapshot → connection) so the
+    # list shows real names instead of an opaque run id. Batched to avoid N+1.
+    comps = {
+        c.id: c
+        for c in db.execute(
+            select(Comparison).where(Comparison.id.in_({r.comparison_id for r in rows}))
+        ).scalars()
+    }
+    snap_ids = {c.source_snapshot_id for c in comps.values()} | {
+        c.dest_snapshot_id for c in comps.values()
+    }
+    snaps = {
+        s.id: s
+        for s in db.execute(select(SchemaSnapshot).where(SchemaSnapshot.id.in_(snap_ids))).scalars()
+    }
+    conns = {
+        cn.id: cn
+        for cn in db.execute(
+            select(Connection).where(Connection.id.in_({s.connection_id for s in snaps.values()}))
+        ).scalars()
+    }
+
+    def _name_of(snapshot_id: uuid.UUID | None) -> str | None:
+        snap = snaps.get(snapshot_id) if snapshot_id else None
+        conn = conns.get(snap.connection_id) if snap else None
+        return conn.name if conn else None
+
     out: list[MigrationRunSummary] = []
     for r in rows:
-        n = (
-            db.query(MigrationRunTable)
-            .filter(MigrationRunTable.run_id == r.id)
-            .count()
-        )
+        n = db.query(MigrationRunTable).filter(MigrationRunTable.run_id == r.id).count()
+        comp = comps.get(r.comparison_id)
         out.append(
             MigrationRunSummary(
                 id=r.id,
                 comparison_id=r.comparison_id,
                 status=r.status.value,
+                source_connection=_name_of(comp.source_snapshot_id) if comp else None,
+                dest_connection=_name_of(comp.dest_snapshot_id) if comp else None,
                 started_at=r.started_at,
                 finished_at=r.finished_at,
                 table_count=n,

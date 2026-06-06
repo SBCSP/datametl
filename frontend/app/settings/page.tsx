@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { CheckCircle2, ExternalLink, KeyRound, Lock, Server, Sparkles, XCircle } from "lucide-react";
-import { api } from "@/lib/api";
+import { api, apiBaseUrl } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -69,12 +69,12 @@ export default function SettingsPage() {
               </Row>
               <div className="pt-2 border-t flex flex-wrap gap-2">
                 <Button variant="outline" size="sm" asChild>
-                  <a href="http://localhost:8000/docs" target="_blank" rel="noreferrer">
+                  <a href={`${apiBaseUrl}/docs`} target="_blank" rel="noreferrer">
                     OpenAPI <ExternalLink className="h-3 w-3" />
                   </a>
                 </Button>
                 <Button variant="outline" size="sm" asChild>
-                  <a href="http://localhost:8000/health" target="_blank" rel="noreferrer">
+                  <a href={`${apiBaseUrl}/health`} target="_blank" rel="noreferrer">
                     Health <ExternalLink className="h-3 w-3" />
                   </a>
                 </Button>
@@ -259,6 +259,42 @@ export default function SettingsPage() {
               <p className="text-xs text-muted-foreground pt-2 border-t">
                 These are the values the backend booted with. Change them in <code className="font-mono">.env</code> and
                 restart with <code className="font-mono">make up</code>.
+              </p>
+            </CardContent>
+          </Card>
+
+          {/* Authentication (env-driven, read-only) */}
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base flex items-center gap-2">
+                <KeyRound className="h-4 w-4" /> Authentication
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2 text-sm">
+              <Row label="In-app login">
+                {data.auth_enabled ? (
+                  <Badge variant="success">
+                    <CheckCircle2 className="h-3 w-3 mr-1" /> enabled
+                  </Badge>
+                ) : (
+                  <Badge variant="secondary">
+                    <XCircle className="h-3 w-3 mr-1" /> disabled
+                  </Badge>
+                )}
+              </Row>
+              <Row label="Username">
+                <code className="font-mono">{data.auth_username ?? "—"}</code>
+              </Row>
+              <Row label="Token TTL">
+                <Badge variant="outline">{data.auth_token_ttl_hours}h</Badge>
+              </Row>
+              <p className="text-xs text-muted-foreground pt-2 border-t">
+                Driven by <code className="font-mono">AUTH_ENABLED</code>,{" "}
+                <code className="font-mono">AUTH_USERNAME</code>, and{" "}
+                <code className="font-mono">AUTH_TOKEN_TTL_HOURS</code> in{" "}
+                <code className="font-mono">.env</code>.{" "}
+                <code className="font-mono">AUTH_PASSWORD</code> only seeds the credential on first
+                login — change it above. Leave disabled when running behind oauth2-proxy/Keycloak.
               </p>
             </CardContent>
           </Card>

@@ -4,14 +4,15 @@ import Link from "next/link";
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Database, RefreshCw, Workflow } from "lucide-react";
+import { Database, Loader2, RefreshCw, Workflow } from "lucide-react";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { envStyle } from "@/lib/environments";
-import type { Connection, SnapshotSummary } from "@/lib/types";
+import type { SnapshotSummary } from "@/lib/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { PageHeader } from "@/components/page-header";
 
 export default function SchemasIndexPage() {
@@ -20,8 +21,8 @@ export default function SchemasIndexPage() {
 
   const connections = useQuery({ queryKey: ["connections"], queryFn: api.listConnections });
 
-  // Per-connection latest-snapshot fetch. N+1 queries — fine at Phase 1 scale; can be
-  // collapsed into a single backend endpoint later if connection counts get large.
+  // Per-connection snapshot fetch. N+1 queries — fine at Phase 1 scale; can be collapsed into a
+  // single backend endpoint later if connection counts get large.
   const snapshotQueries = useQueries({
     queries: (connections.data ?? []).map((c) => ({
       queryKey: ["snapshots", c.id],
@@ -69,83 +70,92 @@ export default function SchemasIndexPage() {
           </CardContent>
         </Card>
       ) : (
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3">
-          {connections.data.map((c) => (
-            <ConnectionCard
-              key={c.id}
-              conn={c}
-              snapshots={snapshotsByConn.get(c.id)}
-              onIntrospect={() => introspect.mutate(c.id)}
-              busy={introspect.isPending}
-            />
-          ))}
-        </div>
+        <Card>
+          <CardContent className="p-0">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Connection</TableHead>
+                  <TableHead>Engine</TableHead>
+                  <TableHead>Latest snapshot</TableHead>
+                  <TableHead className="text-right">Tables</TableHead>
+                  <TableHead className="text-right">Warnings</TableHead>
+                  <TableHead className="text-right">Snapshots</TableHead>
+                  <TableHead className="w-0" />
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {connections.data.map((c) => {
+                  const snaps = snapshotsByConn.get(c.id);
+                  const latest = snaps?.[0];
+                  const env = envStyle(c.environment);
+                  return (
+                    <TableRow key={c.id} className={cn(env && `border-l-2 ${env.border}`)}>
+                      <TableCell className="font-medium">
+                        <Link href={`/schemas/${c.id}`} className="hover:underline">
+                          {c.name}
+                        </Link>
+                        {env && (
+                          <Badge variant="outline" className={cn("ml-2 align-middle", env.badge)}>
+                            <span className={cn("h-1.5 w-1.5 rounded-full", env.dot)} />
+                            {env.label}
+                          </Badge>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant="secondary">{c.engine}</Badge>
+                      </TableCell>
+                      <TableCell className="text-muted-foreground whitespace-nowrap text-sm">
+                        {!snaps ? (
+                          "Loading…"
+                        ) : latest ? (
+                          new Date(latest.captured_at).toLocaleString()
+                        ) : (
+                          <span className="inline-flex items-center gap-1.5">
+                            <Database className="h-3.5 w-3.5" /> Never introspected
+                          </span>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        {latest ? latest.table_count : "—"}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        {!latest ? (
+                          "—"
+                        ) : latest.warning_count > 0 ? (
+                          <span className="text-amber-600 dark:text-amber-500">{latest.warning_count}</span>
+                        ) : (
+                          0
+                        )}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">{snaps?.length ?? "—"}</TableCell>
+                      <TableCell className="text-right whitespace-nowrap">
+                        <Button variant="ghost" size="sm" asChild>
+                          <Link href={`/schemas/${c.id}`}>Open</Link>
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => introspect.mutate(c.id)}
+                          disabled={introspect.isPending}
+                          title={latest ? "Re-introspect" : "Introspect"}
+                        >
+                          {introspect.isPending ? (
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          ) : (
+                            <RefreshCw className="h-3.5 w-3.5" />
+                          )}
+                          {latest ? "Refresh" : "Introspect"}
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
       )}
     </div>
-  );
-}
-
-function ConnectionCard({
-  conn,
-  snapshots,
-  onIntrospect,
-  busy,
-}: {
-  conn: Connection;
-  snapshots: SnapshotSummary[] | undefined;
-  onIntrospect: () => void;
-  busy: boolean;
-}) {
-  const latest = snapshots?.[0];
-  const env = envStyle(conn.environment);
-  return (
-    <Card className={cn("hover:border-foreground/20 transition-colors", env && `border-l-4 ${env.border}`)}>
-      <CardContent className="p-4 space-y-3">
-        <div className="flex items-center justify-between gap-2">
-          <Link href={`/schemas/${conn.id}`} className="font-medium hover:underline truncate">
-            {conn.name}
-          </Link>
-          <div className="flex items-center gap-1.5">
-            {env && <Badge variant="outline" className={env.badge}>{env.label}</Badge>}
-            <Badge variant="secondary">{conn.engine}</Badge>
-          </div>
-        </div>
-
-        <div className="text-xs space-y-1">
-          {!snapshots ? (
-            <span className="text-muted-foreground">Loading snapshots…</span>
-          ) : latest ? (
-            <>
-              <div className="flex items-center gap-2">
-                <Badge variant="success">snapshot</Badge>
-                <span className="text-muted-foreground">
-                  {new Date(latest.captured_at).toLocaleString()}
-                </span>
-              </div>
-              <div className="text-muted-foreground">
-                {latest.table_count} tables
-                {latest.warning_count > 0 && ` · ${latest.warning_count} warnings`}
-                {snapshots.length > 1 && ` · ${snapshots.length} total snapshots`}
-              </div>
-            </>
-          ) : (
-            <div className="flex items-center gap-2 text-muted-foreground">
-              <Database className="h-3 w-3" />
-              <span>Never introspected</span>
-            </div>
-          )}
-        </div>
-
-        <div className="flex items-center justify-between gap-2 pt-1">
-          <Button variant="outline" size="sm" asChild>
-            <Link href={`/schemas/${conn.id}`}>View schema</Link>
-          </Button>
-          <Button size="sm" onClick={onIntrospect} disabled={busy}>
-            <RefreshCw className="h-3.5 w-3.5" />
-            {latest ? "Refresh" : "Introspect"}
-          </Button>
-        </div>
-      </CardContent>
-    </Card>
   );
 }

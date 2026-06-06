@@ -22,6 +22,7 @@ from app.models.pipeline import Pipeline, PipelineRun
 from app.models.scheduled_script import ScheduledRun, ScheduledScript
 from app.models.schema_snapshot import SchemaSnapshot
 from app.models.sql_script import SqlScript
+from app.models.tap import Tap, TapRun
 from app.models.verification_run import VerificationRun
 
 router = APIRouter(prefix="/api/metrics", tags=["metrics"])
@@ -83,10 +84,12 @@ def get_metrics(days: int = Query(14, ge=1, le=90), db: Session = Depends(get_db
         scripts=_count(db, SqlScript),
         pipelines=_count(db, Pipeline),
         schedules=_count(db, ScheduledScript),
+        taps=_count(db, Tap),
         migration_runs=_count(db, MigrationRun),
         verification_runs=_count(db, VerificationRun),
         pipeline_runs=_count(db, PipelineRun),
         scheduled_runs=_count(db, ScheduledRun),
+        tap_runs=_count(db, TapRun),
     )
 
     # Per-day series by event type.
@@ -96,6 +99,7 @@ def get_metrics(days: int = Query(14, ge=1, le=90), db: Session = Depends(get_db
     ver = _counts_by_day(db, VerificationRun.created_at, start, zero)
     pipe = _counts_by_day(db, PipelineRun.created_at, start, zero)
     sched = _counts_by_day(db, ScheduledRun.started_at, start, zero)
+    tap = _counts_by_day(db, TapRun.started_at, start, zero)
 
     series = [
         MetricsSeriesPoint(
@@ -106,6 +110,7 @@ def get_metrics(days: int = Query(14, ge=1, le=90), db: Session = Depends(get_db
             verification=ver[d],
             pipeline=pipe[d],
             scheduled=sched[d],
+            api_fetch=tap[d],
         )
         for d in day_list
     ]
@@ -117,6 +122,7 @@ def get_metrics(days: int = Query(14, ge=1, le=90), db: Session = Depends(get_db
         (VerificationRun.status, VerificationRun.created_at),
         (PipelineRun.status, PipelineRun.created_at),
         (ScheduledRun.status, ScheduledRun.started_at),
+        (TapRun.status, TapRun.started_at),
     ]
     for status_col, ts_col in status_sources:
         for raw in db.execute(select(status_col).where(ts_col >= start)).scalars():

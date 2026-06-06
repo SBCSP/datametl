@@ -309,6 +309,8 @@ export interface MigrationRunSummary {
   id: string;
   comparison_id: string;
   status: MigrationRunStatus;
+  source_connection?: string | null;
+  dest_connection?: string | null;
   started_at?: string | null;
   finished_at?: string | null;
   table_count: number;
@@ -418,10 +420,12 @@ export interface MetricsTotals {
   scripts: number;
   pipelines: number;
   schedules: number;
+  taps: number;
   migration_runs: number;
   verification_runs: number;
   pipeline_runs: number;
   scheduled_runs: number;
+  tap_runs: number;
 }
 export interface MetricsSeriesPoint {
   date: string;
@@ -431,6 +435,7 @@ export interface MetricsSeriesPoint {
   verification: number;
   pipeline: number;
   scheduled: number;
+  api_fetch: number;
 }
 export interface Metrics {
   days: number;
@@ -452,6 +457,9 @@ export interface AppSettings {
   queue_depth: number;
   worker_max_jobs: number;
   worker_job_timeout_seconds: number;
+  auth_enabled: boolean;
+  auth_username: string | null;
+  auth_token_ttl_hours: number;
 }
 
 // --- Chat ---

@@ -23,6 +23,11 @@ class Settings(BaseSettings):
     auth_password: str = Field("", alias="AUTH_PASSWORD")
     auth_token_ttl_hours: int = Field(168, alias="AUTH_TOKEN_TTL_HOURS")
 
+    # Prometheus scrape endpoint at /metrics (outside /api, so not gated by AUTH_ENABLED).
+    # Set METRICS_TOKEN to require `Authorization: Bearer <token>` from the scraper.
+    metrics_enabled: bool = Field(True, alias="METRICS_ENABLED")
+    metrics_token: str = Field("", alias="METRICS_TOKEN")
+
     @property
     def cors_origin_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]

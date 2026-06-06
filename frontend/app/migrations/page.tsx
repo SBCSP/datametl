@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowRightLeft } from "lucide-react";
+import { ArrowRight, ArrowRightLeft } from "lucide-react";
 import { api } from "@/lib/api";
 import type { MigrationRunStatus } from "@/lib/types";
 import { Badge } from "@/components/ui/badge";
@@ -59,6 +59,7 @@ export default function MigrationsPage() {
               <TableHeader>
                 <TableRow>
                   <TableHead>Run</TableHead>
+                  <TableHead>Databases</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Tables</TableHead>
                   <TableHead>Started</TableHead>
@@ -70,6 +71,13 @@ export default function MigrationsPage() {
                 {data.map((r) => (
                   <TableRow key={r.id}>
                     <TableCell className="font-mono text-xs">{r.id.slice(0, 8)}…</TableCell>
+                    <TableCell className="whitespace-nowrap text-sm">
+                      <span className="inline-flex items-center gap-1.5">
+                        <span>{r.source_connection ?? "—"}</span>
+                        <ArrowRight className="h-3.5 w-3.5 text-muted-foreground" />
+                        <span>{r.dest_connection ?? "—"}</span>
+                      </span>
+                    </TableCell>
                     <TableCell>
                       <Badge variant={STATUS_VARIANT[r.status]}>{r.status}</Badge>
                     </TableCell>

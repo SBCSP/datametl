@@ -21,6 +21,7 @@ from app.api import (
     metrics,
     migrations,
     pipelines,
+    prometheus,
     schedules,
     snapshots,
     sql_scripts,
@@ -89,6 +90,7 @@ app.include_router(chat.router)
 app.include_router(mcp.router)
 app.include_router(activity.router)
 app.include_router(metrics.router)
+app.include_router(prometheus.router)
 app.include_router(settings_api.router)
 app.include_router(jobs.router)
 

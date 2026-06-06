@@ -16,6 +16,7 @@ export const SERIES_TYPES: SeriesType[] = [
   { key: "verification", label: "Verifications", color: "#f59e0b" }, // amber
   { key: "pipeline", label: "Pipelines", color: "#06b6d4" }, // cyan
   { key: "scheduled", label: "Scheduled", color: "#ec4899" }, // pink
+  { key: "api_fetch", label: "Taps", color: "#f97316" }, // orange
 ];
 
 function dayTotal(p: MetricsSeriesPoint): number {

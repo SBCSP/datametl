@@ -19,23 +19,26 @@ export interface EnvStyle {
   dot: string;
 }
 
+// Toned-down treatment: a subtle outline badge (faint colored border + muted colored text, no
+// heavy fill) paired with a small solid dot that carries the at-a-glance color cue. The tile
+// accent is a thin, low-opacity left border. Production leans slightly stronger as a safety nudge.
 const STYLES: Record<Environment, EnvStyle> = {
   development: {
     label: "Development",
-    badge: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border-transparent",
-    border: "border-l-emerald-500",
+    badge: "gap-1.5 border-emerald-500/30 text-emerald-600 dark:text-emerald-400/90",
+    border: "border-l-emerald-500/60",
     dot: "bg-emerald-500",
   },
   staging: {
     label: "Staging",
-    badge: "bg-amber-500/15 text-amber-700 dark:text-amber-400 border-transparent",
-    border: "border-l-amber-500",
+    badge: "gap-1.5 border-amber-500/30 text-amber-600 dark:text-amber-400/90",
+    border: "border-l-amber-500/60",
     dot: "bg-amber-500",
   },
   production: {
     label: "Production",
-    badge: "bg-red-500/15 text-red-700 dark:text-red-400 border-transparent",
-    border: "border-l-red-500",
+    badge: "gap-1.5 border-red-500/40 text-red-600 dark:text-red-400",
+    border: "border-l-red-500/80",
     dot: "bg-red-500",
   },
 };
