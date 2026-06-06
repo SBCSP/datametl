@@ -38,10 +38,13 @@ export interface RedactedPostgresCredentials {
   has_sslrootcert: boolean;
 }
 
+export type Environment = "development" | "staging" | "production";
+
 export interface Connection {
   id: string;
   name: string;
   engine: Engine;
+  environment: Environment | null;
   created_at: string;
   updated_at: string;
 }
@@ -116,6 +119,25 @@ export interface Snapshot {
   warnings: SchemaWarning[];
 }
 
+export interface SchemaDdl {
+  sql: string;
+  statement_count: number;
+}
+export interface SchemaApplyStatement {
+  index: number;
+  sql: string;
+  ok: boolean;
+  error: string | null;
+  duration_ms: number;
+}
+export interface SchemaApplyResult {
+  connection_name: string;
+  statement_count: number;
+  ok_count: number;
+  fail_count: number;
+  statements: SchemaApplyStatement[];
+}
+
 export type ColumnDriftKind =
   | "type_changed" | "nullable_changed" | "default_changed" | "pk_changed"
   | "fk_changed" | "missing_in_dest" | "missing_in_source";
@@ -146,6 +168,21 @@ export interface ConnectionSummary {
   id: string;
   name: string;
   engine: Engine;
+}
+
+export interface ComparisonSummary {
+  id: string;
+  created_at: string;
+  source_connection: string | null;
+  source_engine: string | null;
+  dest_connection: string | null;
+  dest_engine: string | null;
+  source_schema: string | null;
+  dest_schema: string | null;
+  ready: boolean;
+  common_tables: number;
+  only_in_source: number;
+  only_in_dest: number;
 }
 
 export interface SnapshotInReport {
@@ -338,7 +375,14 @@ export interface VerificationRunSummary {
 
 // --- Activity / Runs ---
 
-export type ActivityType = "introspection" | "comparison" | "migration" | "verification";
+export type ActivityType =
+  | "introspection"
+  | "comparison"
+  | "migration"
+  | "verification"
+  | "pipeline"
+  | "scheduled"
+  | "api_fetch";
 
 export interface ActivityEntry {
   type: ActivityType;
@@ -349,6 +393,50 @@ export interface ActivityEntry {
   finished_at?: string | null;
   detail?: string | null;
   href: string;
+}
+
+// --- Auth ---
+
+export interface AuthStatus {
+  auth_enabled: boolean;
+  authenticated: boolean;
+  username: string | null;
+}
+export interface LoginResponse {
+  token: string;
+  username: string;
+  expires_at: number;
+}
+
+// --- Dashboard metrics ---
+
+export interface MetricsTotals {
+  connections: number;
+  connections_by_env: Record<string, number>;
+  snapshots: number;
+  comparisons: number;
+  scripts: number;
+  pipelines: number;
+  schedules: number;
+  migration_runs: number;
+  verification_runs: number;
+  pipeline_runs: number;
+  scheduled_runs: number;
+}
+export interface MetricsSeriesPoint {
+  date: string;
+  introspection: number;
+  comparison: number;
+  migration: number;
+  verification: number;
+  pipeline: number;
+  scheduled: number;
+}
+export interface Metrics {
+  days: number;
+  totals: MetricsTotals;
+  series: MetricsSeriesPoint[];
+  status_breakdown: Record<string, number>;
 }
 
 // --- Settings ---
@@ -397,6 +485,73 @@ export interface ChatSessionDetail {
   created_at: string;
   updated_at: string;
 }
+// --- Tap (API data source) ---
+
+export type TapMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+export type TapWriteMode = "append" | "replace";
+
+export interface TapSummary {
+  id: string;
+  name: string;
+  url: string;
+  method: string;
+  dest_count: number;
+  last_run_status: string | null;
+  last_run_at: string | null;
+  is_scheduled: boolean;
+  schedule_enabled: boolean;
+  updated_at: string;
+}
+export interface Tap {
+  id: string;
+  name: string;
+  url: string;
+  method: TapMethod;
+  records_path: string;
+  headers: Record<string, string>; // values masked
+  query_params: Record<string, string>; // values masked
+  has_body: boolean;
+  dest_connection_ids: string[];
+  dest_table: string;
+  write_mode: TapWriteMode;
+  created_at: string;
+  updated_at: string;
+}
+export interface TapTestResult {
+  ok: boolean;
+  http_status: number | null;
+  record_count: number;
+  sample: unknown[];
+  error: string | null;
+}
+export interface TapRunSummaryItem {
+  connection_name: string | null;
+  ok: boolean;
+  rows_written: number;
+  error: string | null;
+}
+export interface TapRun {
+  id: string;
+  tap_id: string;
+  status: "running" | "succeeded" | "failed" | string;
+  http_status: number | null;
+  record_count: number | null;
+  sample: unknown[];
+  summary: TapRunSummaryItem[];
+  error: string | null;
+  started_at: string;
+  finished_at: string | null;
+}
+
+export interface JobProgress {
+  connection?: string | null;
+  phase?: string; // "tables" | "views" | "done"
+  schema?: string;
+  current?: number;
+  total?: number;
+  object?: string;
+  updated_at?: number;
+}
 export interface JobStatus {
   id: string;
   status: "queued" | "in_progress" | "complete" | "not_found" | string;
@@ -404,6 +559,7 @@ export interface JobStatus {
   enqueue_time: string | null;
   result: unknown;
   error: string | null;
+  progress?: JobProgress | null;
 }
 
 // --- SQL scripts ---
@@ -447,15 +603,20 @@ export interface ScriptRunResult {
 
 // --- Scheduled scripts (cron) ---
 
+export type ScheduleTargetKind = "script" | "tap";
 export interface Schedule {
   id: string;
   name: string;
-  script_id: string;
+  target_kind: ScheduleTargetKind;
+  script_id: string | null;
   script_name: string | null;
   connection_ids: string[];
+  allow_writes: boolean;
+  tap_id: string | null;
+  tap_name: string | null;
+  tap_write_mode: TapWriteMode | null;
   cron: string;
   timezone: string;
-  allow_writes: boolean;
   enabled: boolean;
   last_run_at: string | null;
   next_run_at: string | null;

@@ -15,6 +15,14 @@ class Settings(BaseSettings):
     log_level: str = Field("INFO", alias="LOG_LEVEL")
     cors_origins: str = Field("http://localhost:3000", alias="CORS_ORIGINS")
 
+    # Simple in-app login (single shared user). Off by default — when behind oauth2-proxy or
+    # for local dev, leave AUTH_ENABLED unset. AUTH_PASSWORD only seeds the credential on first
+    # run; after that the hash lives in the metadata DB and is changed via the API.
+    auth_enabled: bool = Field(False, alias="AUTH_ENABLED")
+    auth_username: str = Field("admin", alias="AUTH_USERNAME")
+    auth_password: str = Field("", alias="AUTH_PASSWORD")
+    auth_token_ttl_hours: int = Field(168, alias="AUTH_TOKEN_TTL_HOURS")
+
     @property
     def cors_origin_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
@@ -22,7 +30,7 @@ class Settings(BaseSettings):
 
 @lru_cache
 def _load() -> Settings:
-    return Settings()  # type: ignore[call-arg]
+    return Settings()
 
 
 settings: Settings = _load()

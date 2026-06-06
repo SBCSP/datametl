@@ -4,10 +4,12 @@ import { Suspense, use, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { AlertTriangle, Info, Loader2, RefreshCw, Database } from "lucide-react";
+import { AlertTriangle, Boxes, History, Info, Loader2, RefreshCw, Database } from "lucide-react";
 import { api } from "@/lib/api";
+import { cn } from "@/lib/utils";
 import { useJob } from "@/lib/use-job";
-import type { NormalizedSchema, SchemaWarning } from "@/lib/types";
+import type { JobProgress, NormalizedSchema, SchemaWarning, SnapshotSummary } from "@/lib/types";
+import { ApplySchemaDialog } from "@/components/apply-schema-dialog";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -44,20 +46,28 @@ function SchemaPageBody({ params }: { params: Promise<{ connectionId: string }> 
   // /connections) or from the local Introspect button below.
   const [activeJob, setActiveJob] = useState<string | null>(search.get("job"));
   const job = useJob(activeJob);
+  // Which snapshot is being viewed (defaults to the latest; see effect below).
+  const [selectedId, setSelectedId] = useState<string | null>(null);
 
-  // When the job finishes, refetch snapshots so the new one shows up immediately.
+  // When the job finishes, refetch snapshots and follow the newest one.
   useEffect(() => {
     if (job.data?.status === "complete" && !job.data.error) {
       qc.invalidateQueries({ queryKey: ["snapshots", connectionId] });
       setActiveJob(null);
+      setSelectedId(null);
     }
   }, [job.data?.status, job.data?.error, qc, connectionId]);
 
   const latestSnapshotId = snaps.data?.[0]?.id;
+  // Default the selection to the latest snapshot (and re-default after a fresh introspect).
+  useEffect(() => {
+    if (!selectedId && latestSnapshotId) setSelectedId(latestSnapshotId);
+  }, [selectedId, latestSnapshotId]);
+
   const snapshot = useQuery({
-    queryKey: ["snapshot", latestSnapshotId],
-    queryFn: () => api.getSnapshot(latestSnapshotId!),
-    enabled: !!latestSnapshotId,
+    queryKey: ["snapshot", selectedId],
+    queryFn: () => api.getSnapshot(selectedId!),
+    enabled: !!selectedId,
   });
 
   const introspectMut = useMutation({
@@ -72,6 +82,7 @@ function SchemaPageBody({ params }: { params: Promise<{ connectionId: string }> 
 
   const isRunning = !!activeJob && job.data?.status !== "complete";
   const jobErrored = job.data?.status === "complete" && !!job.data.error;
+  const [applyOpen, setApplyOpen] = useState(false);
 
   return (
     <div>
@@ -89,24 +100,54 @@ function SchemaPageBody({ params }: { params: Promise<{ connectionId: string }> 
           { label: conn.data?.name ?? "…" },
         ]}
         actions={
-          <Button onClick={() => introspectMut.mutate()} disabled={introspectMut.isPending || isRunning}>
-            {isRunning ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <RefreshCw className="h-4 w-4" />
+          <div className="flex gap-2">
+            {selectedId && (
+              <Button variant="outline" onClick={() => setApplyOpen(true)}>
+                <Boxes className="h-4 w-4" /> Apply schema
+              </Button>
             )}
-            {snaps.data?.length ? "Refresh snapshot" : "Introspect"}
-          </Button>
+            <Button onClick={() => introspectMut.mutate()} disabled={introspectMut.isPending || isRunning}>
+              {isRunning ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <RefreshCw className="h-4 w-4" />
+              )}
+              {snaps.data?.length ? "Refresh snapshot" : "Introspect"}
+            </Button>
+          </div>
         }
       />
 
-      <div className="space-y-6">
-        {isRunning && <RunningBanner status={job.data?.status} />}
-        {jobErrored && <ErroredBanner error={job.data!.error!} />}
-        {snapshot.data?.warnings.length ? <Warnings warnings={snapshot.data.warnings} /> : null}
+      {selectedId && (
+        <ApplySchemaDialog
+          snapshotId={selectedId}
+          sourceConnectionId={connectionId}
+          open={applyOpen}
+          onOpenChange={setApplyOpen}
+        />
+      )}
 
-        {snapshot.data ? (
-          <SchemaTree schema={snapshot.data.normalized_schema} />
+      <div className="space-y-6">
+        {isRunning && <RunningBanner status={job.data?.status} progress={job.data?.progress} />}
+        {jobErrored && <ErroredBanner error={job.data!.error!} />}
+
+        {snaps.data && snaps.data.length > 0 ? (
+          <div className="grid gap-6 lg:grid-cols-[18rem_1fr]">
+            <SnapshotHistory
+              snapshots={snaps.data}
+              selectedId={selectedId}
+              latestId={latestSnapshotId}
+              onSelect={setSelectedId}
+            />
+            <div className="min-w-0 space-y-6">
+              {snapshot.data?.warnings.length ? <Warnings warnings={snapshot.data.warnings} /> : null}
+              {snapshot.isLoading ? (
+                <p className="text-sm text-muted-foreground">Loading snapshot…</p>
+              ) : snapshot.data ? (
+                <SchemaTree schema={snapshot.data.normalized_schema} />
+              ) : null}
+            </div>
+          </div>
         ) : !isRunning && !jobErrored ? (
           <EmptyState onIntrospect={() => introspectMut.mutate()} disabled={introspectMut.isPending} />
         ) : null}
@@ -115,14 +156,101 @@ function SchemaPageBody({ params }: { params: Promise<{ connectionId: string }> 
   );
 }
 
-function RunningBanner({ status }: { status?: string }) {
+function SnapshotHistory({
+  snapshots,
+  selectedId,
+  latestId,
+  onSelect,
+}: {
+  snapshots: SnapshotSummary[];
+  selectedId: string | null;
+  latestId?: string;
+  onSelect: (id: string) => void;
+}) {
+  return (
+    <Card className="h-fit lg:sticky lg:top-4">
+      <CardHeader className="pb-2">
+        <CardTitle className="flex items-center gap-2 text-sm">
+          <History className="h-4 w-4" /> Snapshots
+          <span className="ml-auto text-xs font-normal text-muted-foreground">{snapshots.length}</span>
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="p-2">
+        <ul className="max-h-[65vh] space-y-0.5 overflow-y-auto">
+          {snapshots.map((s) => {
+            const active = s.id === selectedId;
+            return (
+              <li key={s.id}>
+                <button
+                  type="button"
+                  onClick={() => onSelect(s.id)}
+                  className={cn(
+                    "w-full rounded-md px-2.5 py-2 text-left transition-colors hover:bg-accent",
+                    active && "bg-accent",
+                  )}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-sm font-medium">
+                      {new Date(s.captured_at).toLocaleString()}
+                    </span>
+                    {s.id === latestId && (
+                      <Badge variant="success" className="px-1.5 py-0 text-[10px]">
+                        latest
+                      </Badge>
+                    )}
+                  </div>
+                  <div className="mt-0.5 text-xs text-muted-foreground">
+                    {s.table_count} table{s.table_count === 1 ? "" : "s"}
+                    {s.warning_count > 0 && ` · ${s.warning_count} warning${s.warning_count === 1 ? "" : "s"}`}
+                  </div>
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      </CardContent>
+    </Card>
+  );
+}
+
+function RunningBanner({ status, progress }: { status?: string; progress?: JobProgress | null }) {
+  const total = progress?.total ?? 0;
+  const current = progress?.current ?? 0;
+  const pct = total > 0 ? Math.min(100, Math.round((current / total) * 100)) : null;
+  const phase = progress?.phase === "views" ? "view" : "table";
+  const done = progress?.phase === "done";
+
   return (
     <Alert>
       <Loader2 className="h-4 w-4 animate-spin" />
       <AlertTitle>Introspection running</AlertTitle>
       <AlertDescription>
-        Worker is reading schemas, tables, columns, indexes, RLS policies, and view definitions from the database.
-        On a large Supabase project this may take 10–60 seconds. Status: {status ?? "queued"}.
+        {progress && total > 0 && !done ? (
+          <div className="space-y-2">
+            <div className="flex items-center justify-between gap-3 text-sm">
+              <span>
+                {progress.connection ? <span className="font-medium">{progress.connection}</span> : "Reading schema"}
+                {progress.schema ? <> · <span className="font-mono text-xs">{progress.schema}</span></> : null}{" "}
+                {phase} <span className="tabular-nums">{current}/{total}</span>
+                {progress.object ? (
+                  <span className="text-muted-foreground"> ({progress.object})</span>
+                ) : null}
+              </span>
+              {pct !== null && <span className="tabular-nums text-muted-foreground">{pct}%</span>}
+            </div>
+            <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
+              <div
+                className="h-full rounded-full bg-primary transition-all"
+                style={{ width: `${pct ?? 0}%` }}
+              />
+            </div>
+          </div>
+        ) : (
+          <>
+            Worker is reading schemas, tables, columns, indexes, RLS policies, and view definitions from the
+            database. On a large database this can take a while. Status: {status ?? "queued"}.
+          </>
+        )}
       </AlertDescription>
     </Alert>
   );

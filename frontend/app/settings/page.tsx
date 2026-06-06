@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { CheckCircle2, ExternalLink, Lock, Server, Sparkles, XCircle } from "lucide-react";
+import { CheckCircle2, ExternalLink, KeyRound, Lock, Server, Sparkles, XCircle } from "lucide-react";
 import { api } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -29,6 +29,19 @@ export default function SettingsPage() {
       toast.success(r.anthropic_api_key_set ? "Anthropic key saved" : "Anthropic key cleared");
     },
     onError: (e) => toast.error(String(e)),
+  });
+
+  const { data: auth } = useQuery({ queryKey: ["auth-status"], queryFn: api.authStatus, retry: false });
+  const [currentPw, setCurrentPw] = useState("");
+  const [newPw, setNewPw] = useState("");
+  const changePw = useMutation({
+    mutationFn: () => api.changePassword(currentPw, newPw),
+    onSuccess: () => {
+      setCurrentPw("");
+      setNewPw("");
+      toast.success("Password changed");
+    },
+    onError: () => toast.error("Couldn't change password — check your current password."),
   });
 
   return (
@@ -97,6 +110,53 @@ export default function SettingsPage() {
               </p>
             </CardContent>
           </Card>
+
+          {/* Login (change password) — only when in-app auth is enabled */}
+          {auth?.auth_enabled && (
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base flex items-center gap-2">
+                  <KeyRound className="h-4 w-4" /> Login
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3 text-sm">
+                <Row label="Signed in as">
+                  <Badge variant="secondary">{auth.username ?? "—"}</Badge>
+                </Row>
+                <div className="space-y-1.5">
+                  <Label htmlFor="cur-pw">Current password</Label>
+                  <Input
+                    id="cur-pw"
+                    type="password"
+                    autoComplete="current-password"
+                    value={currentPw}
+                    onChange={(e) => setCurrentPw(e.target.value)}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="new-pw">New password</Label>
+                  <Input
+                    id="new-pw"
+                    type="password"
+                    autoComplete="new-password"
+                    value={newPw}
+                    onChange={(e) => setNewPw(e.target.value)}
+                  />
+                </div>
+                <Button
+                  size="sm"
+                  onClick={() => changePw.mutate()}
+                  disabled={!currentPw || !newPw || changePw.isPending}
+                >
+                  Change password
+                </Button>
+                <p className="text-xs text-muted-foreground pt-2 border-t">
+                  Single shared login, gated by <code className="font-mono">AUTH_ENABLED</code>. The
+                  password is hashed (scrypt) and stored encrypted at rest.
+                </p>
+              </CardContent>
+            </Card>
+          )}
 
           {/* Anthropic API key (editable, write-only) */}
           <Card>

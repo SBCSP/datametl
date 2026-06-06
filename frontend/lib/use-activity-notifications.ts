@@ -14,18 +14,23 @@ const TYPE_LABEL: Record<ActivityEntry["type"], string> = {
   comparison: "Comparison",
   migration: "Migration",
   verification: "Verification",
+  pipeline: "Pipeline",
+  scheduled: "Schedule",
+  api_fetch: "Tap",
 };
 
 /** Mounted at the AppShell level so toasts fire on any page. Polls activity every 3s,
  * tracks which jobs were active last poll, and emits a success / error toast when one
  * transitions to a terminal status. */
-export function useActivityNotifications() {
+export function useActivityNotifications(opts?: { enabled?: boolean }) {
+  const enabled = opts?.enabled ?? true;
   const { data } = useQuery({
     queryKey: ["activity"],
     queryFn: api.listActivity,
     refetchInterval: 3_000,
     refetchOnWindowFocus: false,
     retry: false,
+    enabled,
   });
 
   // Tracks the IDs we last saw as active. Diffing against the next poll tells us which

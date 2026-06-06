@@ -12,6 +12,7 @@ from app.models.app_setting import AppSetting  # noqa: E402
 from app.models.chat_session import ChatSession  # noqa: E402
 from app.models.comparison import Comparison  # noqa: E402
 from app.models.connection import Connection  # noqa: E402
+from app.models.introspection_run import IntrospectionRun  # noqa: E402
 from app.models.mapping import Mapping  # noqa: E402
 from app.models.mcp_session import McpSession  # noqa: E402
 from app.models.migration_run import MigrationRun, MigrationRunStatus  # noqa: E402
@@ -27,6 +28,7 @@ from app.models.pipeline import (  # noqa: E402
     PipelineStep,
 )
 from app.models.scheduled_script import ScheduledRun, ScheduledScript  # noqa: E402
+from app.models.tap import Tap, TapRun  # noqa: E402
 from app.models.schema_snapshot import SchemaSnapshot  # noqa: E402
 from app.models.sql_script import SqlScript  # noqa: E402
 from app.models.verification_run import VerificationRun, VerificationRunStatus  # noqa: E402
@@ -42,6 +44,7 @@ __all__ = [
     "Comparison",
     "ConflictMode",
     "Connection",
+    "IntrospectionRun",
     "Mapping",
     "McpSession",
     "MigrationRun",
@@ -55,6 +58,8 @@ __all__ = [
     "ScheduledScript",
     "SchemaSnapshot",
     "SqlScript",
+    "Tap",
+    "TapRun",
     "TableRunStatus",
     "VerificationRun",
     "VerificationRunStatus",

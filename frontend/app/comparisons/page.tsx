@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
-import { GitCompareArrows, Plus } from "lucide-react";
+import { ArrowRight, GitCompareArrows, Plus } from "lucide-react";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -53,7 +53,9 @@ export default function ComparisonsPage() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>ID</TableHead>
+                  <TableHead>Databases</TableHead>
+                  <TableHead>Scope</TableHead>
+                  <TableHead>Drift</TableHead>
                   <TableHead>Created</TableHead>
                   <TableHead className="text-right">Open</TableHead>
                 </TableRow>
@@ -61,9 +63,41 @@ export default function ComparisonsPage() {
               <TableBody>
                 {data.map((c) => (
                   <TableRow key={c.id}>
-                    <TableCell className="font-mono text-xs">{c.id}</TableCell>
-                    <TableCell>{new Date(c.created_at).toLocaleString()}</TableCell>
-                    <TableCell className="text-right space-x-2">
+                    <TableCell>
+                      <div className="flex items-center gap-2 font-medium">
+                        <span className="truncate">{c.source_connection ?? "(deleted)"}</span>
+                        <ArrowRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                        <span className="truncate">{c.dest_connection ?? "(deleted)"}</span>
+                      </div>
+                    </TableCell>
+                    <TableCell className="whitespace-nowrap text-xs text-muted-foreground">
+                      {c.source_schema && c.dest_schema ? (
+                        <span className="font-mono">
+                          {c.source_schema} → {c.dest_schema}
+                        </span>
+                      ) : (
+                        "all schemas"
+                      )}
+                    </TableCell>
+                    <TableCell className="whitespace-nowrap text-xs">
+                      {!c.ready ? (
+                        <span className="text-muted-foreground">computing…</span>
+                      ) : (
+                        <span className="text-muted-foreground">
+                          {c.common_tables} common
+                          {c.only_in_source > 0 && (
+                            <span className="text-amber-600 dark:text-amber-500"> · {c.only_in_source} src-only</span>
+                          )}
+                          {c.only_in_dest > 0 && (
+                            <span className="text-sky-600 dark:text-sky-400"> · {c.only_in_dest} dst-only</span>
+                          )}
+                        </span>
+                      )}
+                    </TableCell>
+                    <TableCell className="whitespace-nowrap text-muted-foreground">
+                      {new Date(c.created_at).toLocaleString()}
+                    </TableCell>
+                    <TableCell className="text-right space-x-2 whitespace-nowrap">
                       <Button size="sm" variant="outline" asChild>
                         <Link href={`/comparisons/${c.id}`}>Diff</Link>
                       </Button>

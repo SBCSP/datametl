@@ -8,13 +8,16 @@ from arq.connections import RedisSettings
 
 from app.config import settings
 from app.jobs.tasks import (
+    apply_schema,
     dispatch_due_schedules,
     execute_sql_script,
+    fetch_tap,
     introspect_connection,
     run_comparison,
     run_migration,
     run_pipeline,
     run_scheduled_script,
+    run_scheduled_tap,
     run_verification,
 )
 
@@ -41,6 +44,9 @@ class WorkerSettings:
         execute_sql_script,
         run_scheduled_script,
         run_pipeline,
+        apply_schema,
+        fetch_tap,
+        run_scheduled_tap,
     ]
     # Fires every minute (at :00s) to enqueue any due scheduled scripts. The dispatcher itself
     # is cheap (one indexed query); the actual runs go through run_scheduled_script.

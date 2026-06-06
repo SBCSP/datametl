@@ -11,6 +11,7 @@ from app.api.schemas_io import (
     ComparisonEnqueued,
     ComparisonRead,
     ComparisonReport,
+    ComparisonSummary,
     ConnectionSummary,
     SnapshotInReport,
 )
@@ -23,9 +24,50 @@ from app.models.schema_snapshot import SchemaSnapshot
 router = APIRouter(prefix="/api/comparisons", tags=["comparisons"])
 
 
-@router.get("", response_model=list[ComparisonRead])
-def list_comparisons(db: Session = Depends(get_db)) -> list[Comparison]:
-    return list(db.execute(select(Comparison).order_by(Comparison.created_at.desc())).scalars())
+@router.get("", response_model=list[ComparisonSummary])
+def list_comparisons(db: Session = Depends(get_db)) -> list[ComparisonSummary]:
+    """Each row resolves its source/dest databases (snapshot → connection) so the list shows
+    real names. Batched lookups avoid N+1 across snapshots/connections."""
+    comparisons = list(db.execute(select(Comparison).order_by(Comparison.created_at.desc())).scalars())
+
+    snap_ids = {c.source_snapshot_id for c in comparisons} | {c.dest_snapshot_id for c in comparisons}
+    snaps = {
+        sn.id: sn
+        for sn in db.execute(select(SchemaSnapshot).where(SchemaSnapshot.id.in_(snap_ids))).scalars()
+    }
+    conn_ids = {sn.connection_id for sn in snaps.values()}
+    conns = {
+        cn.id: cn
+        for cn in db.execute(select(Connection).where(Connection.id.in_(conn_ids))).scalars()
+    }
+
+    def _conn_of(snapshot_id: uuid.UUID) -> tuple[str | None, str | None]:
+        snap = snaps.get(snapshot_id)
+        conn = conns.get(snap.connection_id) if snap else None
+        return (conn.name, conn.engine) if conn else (None, None)
+
+    out: list[ComparisonSummary] = []
+    for c in comparisons:
+        src_name, src_engine = _conn_of(c.source_snapshot_id)
+        dst_name, dst_engine = _conn_of(c.dest_snapshot_id)
+        d = c.diff or {}
+        out.append(
+            ComparisonSummary(
+                id=c.id,
+                created_at=c.created_at,
+                source_connection=src_name,
+                source_engine=src_engine,
+                dest_connection=dst_name,
+                dest_engine=dst_engine,
+                source_schema=c.source_schema,
+                dest_schema=c.dest_schema,
+                ready=bool(d),
+                common_tables=len(d.get("common_tables") or []),
+                only_in_source=len(d.get("tables_only_in_source") or []),
+                only_in_dest=len(d.get("tables_only_in_dest") or []),
+            )
+        )
+    return out
 
 
 @router.post("", response_model=ComparisonEnqueued, status_code=status.HTTP_202_ACCEPTED)

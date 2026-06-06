@@ -21,22 +21,28 @@ from app.jobs.queue import enqueue
 from app.models.connection import Connection
 from app.models.scheduled_script import ScheduledRun, ScheduledScript
 from app.models.sql_script import SqlScript
+from app.models.tap import Tap, TapRun
 from app.scheduling.cron import CronError, next_run, preview
 
 router = APIRouter(prefix="/api/schedules", tags=["schedules"])
 
 
 def _to_read(db: Session, sched: ScheduledScript) -> ScheduleRead:
-    script = db.get(SqlScript, sched.script_id)
+    script = db.get(SqlScript, sched.script_id) if sched.script_id else None
+    tap = db.get(Tap, sched.tap_id) if sched.tap_id else None
     return ScheduleRead(
         id=sched.id,
         name=sched.name,
+        target_kind=sched.target_kind,
         script_id=sched.script_id,
         script_name=script.name if script else None,
         connection_ids=[uuid.UUID(c) for c in sched.connection_ids],
+        allow_writes=sched.allow_writes,
+        tap_id=sched.tap_id,
+        tap_name=tap.name if tap else None,
+        tap_write_mode=sched.tap_write_mode,
         cron=sched.cron,
         timezone=sched.timezone,
-        allow_writes=sched.allow_writes,
         enabled=sched.enabled,
         last_run_at=sched.last_run_at,
         next_run_at=sched.next_run_at,
@@ -50,6 +56,13 @@ def _require_script(db: Session, script_id: uuid.UUID) -> SqlScript:
     if script is None:
         raise HTTPException(404, "Script not found")
     return script
+
+
+def _require_tap(db: Session, tap_id: uuid.UUID) -> Tap:
+    tap = db.get(Tap, tap_id)
+    if tap is None:
+        raise HTTPException(404, "Tap not found")
+    return tap
 
 
 def _validate_connections(db: Session, connection_ids: list[uuid.UUID]) -> None:
@@ -71,20 +84,36 @@ def list_schedules(db: Session = Depends(get_db)) -> list[ScheduleRead]:
 
 @router.post("", response_model=ScheduleRead, status_code=status.HTTP_201_CREATED)
 def create_schedule(payload: ScheduleCreate, db: Session = Depends(get_db)) -> ScheduleRead:
-    script = _require_script(db, payload.script_id)
-    _validate_connections(db, payload.connection_ids)
+    if payload.target_kind == "tap":
+        if payload.tap_id is None:
+            raise HTTPException(422, "tap_id is required for a tap schedule")
+        if payload.tap_write_mode is None:
+            raise HTTPException(422, "tap_write_mode is required for a tap schedule")
+        default_name = _require_tap(db, payload.tap_id).name
+    else:
+        if payload.script_id is None:
+            raise HTTPException(422, "script_id is required for a script schedule")
+        if not payload.connection_ids:
+            raise HTTPException(422, "Select at least one connection")
+        _validate_connections(db, payload.connection_ids)
+        default_name = _require_script(db, payload.script_id).name
+
     try:
         upcoming = next_run(payload.cron, payload.timezone)
     except CronError as e:
         raise HTTPException(422, str(e)) from e
 
+    is_tap = payload.target_kind == "tap"
     sched = ScheduledScript(
-        name=(payload.name or script.name).strip() or script.name,
-        script_id=payload.script_id,
-        connection_ids=[str(c) for c in payload.connection_ids],
+        name=(payload.name or default_name).strip() or default_name,
+        target_kind=payload.target_kind,
+        script_id=None if is_tap else payload.script_id,
+        connection_ids=[] if is_tap else [str(c) for c in payload.connection_ids],
+        allow_writes=payload.allow_writes,
+        tap_id=payload.tap_id if is_tap else None,
+        tap_write_mode=payload.tap_write_mode if is_tap else None,
         cron=payload.cron,
         timezone=payload.timezone,
-        allow_writes=payload.allow_writes,
         enabled=payload.enabled,
         next_run_at=upcoming if payload.enabled else None,
     )
@@ -110,12 +139,19 @@ def update_schedule(
     if sched is None:
         raise HTTPException(404, "Schedule not found")
 
+    if payload.target_kind is not None:
+        sched.target_kind = payload.target_kind
     if payload.script_id is not None:
         _require_script(db, payload.script_id)
         sched.script_id = payload.script_id
     if payload.connection_ids is not None:
         _validate_connections(db, payload.connection_ids)
         sched.connection_ids = [str(c) for c in payload.connection_ids]
+    if payload.tap_id is not None:
+        _require_tap(db, payload.tap_id)
+        sched.tap_id = payload.tap_id
+    if payload.tap_write_mode is not None:
+        sched.tap_write_mode = payload.tap_write_mode
     if payload.name is not None:
         sched.name = payload.name.strip() or sched.name
     if payload.cron is not None:
@@ -156,25 +192,61 @@ async def run_schedule_now(schedule_id: uuid.UUID, db: Session = Depends(get_db)
     sched = db.get(ScheduledScript, schedule_id)
     if sched is None:
         raise HTTPException(404, "Schedule not found")
-    job_id = await enqueue("run_scheduled_script", str(schedule_id))
+    job = "run_scheduled_tap" if sched.target_kind == "tap" else "run_scheduled_script"
+    job_id = await enqueue(job, str(schedule_id))
     return JobEnqueued(job_id=job_id)
 
 
 @router.get("/{schedule_id}/runs", response_model=list[ScheduledRunRead])
 def list_schedule_runs(
     schedule_id: uuid.UUID, limit: int = 25, db: Session = Depends(get_db)
-) -> list[ScheduledRun]:
+) -> list[ScheduledRunRead]:
     sched = db.get(ScheduledScript, schedule_id)
     if sched is None:
         raise HTTPException(404, "Schedule not found")
-    return list(
-        db.execute(
+    capped = max(1, min(limit, 200))
+
+    # Tap schedules don't create ScheduledRun rows — the fetch's TapRun is the record. Adapt
+    # the tap's recent fetches to the same shape so the History dialog works uniformly.
+    if sched.target_kind == "tap":
+        if sched.tap_id is None:
+            return []
+        tap_runs = db.execute(
+            select(TapRun)
+            .where(TapRun.tap_id == sched.tap_id)
+            .order_by(TapRun.started_at.desc())
+            .limit(capped)
+        ).scalars()
+        return [
+            ScheduledRunRead(
+                id=r.id,
+                schedule_id=schedule_id,
+                status=r.status,
+                error=r.error,
+                summary=r.summary,
+                started_at=r.started_at,
+                finished_at=r.finished_at,
+            )
+            for r in tap_runs
+        ]
+
+    return [
+        ScheduledRunRead(
+            id=r.id,
+            schedule_id=r.schedule_id,
+            status=r.status,
+            error=r.error,
+            summary=r.summary,
+            started_at=r.started_at,
+            finished_at=r.finished_at,
+        )
+        for r in db.execute(
             select(ScheduledRun)
             .where(ScheduledRun.schedule_id == schedule_id)
             .order_by(ScheduledRun.started_at.desc())
-            .limit(max(1, min(limit, 200)))
+            .limit(capped)
         ).scalars()
-    )
+    ]
 
 
 @router.post("/preview", response_model=CronPreviewResponse)

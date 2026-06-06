@@ -47,6 +47,7 @@ def create_connection(payload: ConnectionCreate, db: Session = Depends(get_db)) 
     conn = Connection(
         name=payload.name,
         engine=payload.engine,
+        environment=payload.environment,
         encrypted_credentials=vault.encrypt(payload.credentials.model_dump()),
     )
     db.add(conn)
@@ -69,6 +70,7 @@ def get_connection(connection_id: uuid.UUID, db: Session = Depends(get_db)) -> C
         id=conn.id,
         name=conn.name,
         engine=conn.engine,
+        environment=conn.environment,
         created_at=conn.created_at,
         updated_at=conn.updated_at,
         redacted_credentials=_redact(creds),
@@ -84,6 +86,9 @@ def update_connection(
         raise HTTPException(404, "Connection not found")
     if payload.name is not None:
         conn.name = payload.name
+    # Use model_fields_set so an explicit null clears the label (vs. simply not sent).
+    if "environment" in payload.model_fields_set:
+        conn.environment = payload.environment
     if payload.credentials is not None:
         # Merge: only fields explicitly set in the update payload are replaced; everything
         # else (including password and sslrootcert) keeps its previous value. This lets the
@@ -103,6 +108,7 @@ def update_connection(
         id=conn.id,
         name=conn.name,
         engine=conn.engine,
+        environment=conn.environment,
         created_at=conn.created_at,
         updated_at=conn.updated_at,
         redacted_credentials=_redact(creds),

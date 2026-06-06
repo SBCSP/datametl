@@ -13,6 +13,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { PageHeader } from "@/components/page-header";
+import { ENVIRONMENTS, type Environment, envStyle } from "@/lib/environments";
 
 const SSL_MODES = ["disable", "allow", "prefer", "require", "verify-ca", "verify-full"] as const;
 type SslMode = (typeof SSL_MODES)[number];
@@ -27,6 +28,7 @@ export default function NewConnectionPage() {
     database: "",
     user: "postgres",
     password: "",
+    environment: "" as Environment | "",
     sslmode: "" as SslMode | "",
     sslrootcert: "",
   });
@@ -55,6 +57,7 @@ export default function NewConnectionPage() {
       api.createConnection({
         name: form.name,
         engine: "postgres",
+        environment: form.environment || undefined,
         credentials: {
           host: form.host,
           port: Number(form.port),
@@ -96,6 +99,29 @@ export default function NewConnectionPage() {
           <CardContent className="grid grid-cols-2 gap-4">
             <Field label="Name" col2>
               <Input value={form.name} onChange={(e) => set("name", e.target.value)} placeholder="prod-supabase" />
+            </Field>
+            <Field label="Environment" col2>
+              <Select value={form.environment} onValueChange={(v) => set("environment", v as Environment)}>
+                <SelectTrigger>
+                  <SelectValue placeholder="(none)" />
+                </SelectTrigger>
+                <SelectContent>
+                  {ENVIRONMENTS.map((e) => {
+                    const st = envStyle(e.value)!;
+                    return (
+                      <SelectItem key={e.value} value={e.value}>
+                        <span className="flex items-center gap-2">
+                          <span className={`h-2.5 w-2.5 rounded-full ${st.dot}`} />
+                          {e.label}
+                        </span>
+                      </SelectItem>
+                    );
+                  })}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                Color-codes this connection across the app — development (green), staging (amber), production (red).
+              </p>
             </Field>
             <Field label="Host">
               <Input value={form.host} onChange={(e) => set("host", e.target.value)} />

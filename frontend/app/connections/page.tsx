@@ -6,6 +6,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Database, Plus } from "lucide-react";
 import { api } from "@/lib/api";
+import { cn } from "@/lib/utils";
+import { envStyle } from "@/lib/environments";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -92,12 +94,25 @@ export default function ConnectionsPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {data.map((c) => (
-                  <TableRow key={c.id} className={activeId === c.id ? "bg-orange-500/5" : ""}>
+                {data.map((c) => {
+                  const env = envStyle(c.environment);
+                  return (
+                  <TableRow
+                    key={c.id}
+                    className={cn(
+                      env && `border-l-4 ${env.border}`,
+                      activeId === c.id && "bg-orange-500/5",
+                    )}
+                  >
                     <TableCell className="font-medium">
                       <Link href={`/schemas/${c.id}`} className="hover:underline">
                         {c.name}
                       </Link>
+                      {env && (
+                        <Badge variant="outline" className={cn("ml-2 align-middle", env.badge)}>
+                          {env.label}
+                        </Badge>
+                      )}
                       {activeId === c.id && (
                         <Badge variant="warning" className="ml-2 align-middle">Active MCP</Badge>
                       )}
@@ -159,7 +174,8 @@ export default function ConnectionsPage() {
                       </Button>
                     </TableCell>
                   </TableRow>
-                ))}
+                  );
+                })}
               </TableBody>
             </Table>
           </CardContent>

@@ -1,11 +1,16 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
 from app.introspection.normalized import Schema
 from app.scripts.runner import StatementResult
+
+# Called with a small progress dict during a long introspection so the UI can show live status,
+# e.g. {"phase": "tables", "schema": "public", "current": 530, "total": 648, "object": "orders"}.
+ProgressFn = Callable[[dict[str, Any]], None]
 
 
 @dataclass(frozen=True)
@@ -30,7 +35,9 @@ class Connector(ABC):
     def test_connection(self) -> ConnectionTestResult: ...
 
     @abstractmethod
-    def introspect(self) -> Schema: ...
+    def introspect(
+        self, *, connection_name: str | None = None, on_progress: ProgressFn | None = None
+    ) -> Schema: ...
 
     @abstractmethod
     def run_statements(

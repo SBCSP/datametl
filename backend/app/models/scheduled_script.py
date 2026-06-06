@@ -23,10 +23,20 @@ class ScheduledScript(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
-    script_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("sql_scripts.id", ondelete="CASCADE"), nullable=False
+    # What this schedule runs: "script" (the original) or "tap" (an API data source fetch).
+    target_kind: Mapped[str] = mapped_column(
+        String(16), nullable=False, server_default="script", default="script"
     )
-    # List of connection-uuid strings to fan out to.
+    # Set for target_kind="script"; null for tap schedules.
+    script_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("sql_scripts.id", ondelete="CASCADE"), nullable=True
+    )
+    # Set for target_kind="tap"; the schedule's write mode overrides the tap's own when firing.
+    tap_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("taps.id", ondelete="CASCADE"), nullable=True
+    )
+    tap_write_mode: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    # List of connection-uuid strings to fan out to (script schedules only).
     connection_ids: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
     cron: Mapped[str] = mapped_column(String(255), nullable=False)
     timezone: Mapped[str] = mapped_column(String(64), nullable=False, server_default="UTC")

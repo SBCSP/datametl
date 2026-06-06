@@ -6,6 +6,8 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Database, RefreshCw, Workflow } from "lucide-react";
 import { api } from "@/lib/api";
+import { cn } from "@/lib/utils";
+import { envStyle } from "@/lib/environments";
 import type { Connection, SnapshotSummary } from "@/lib/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -95,14 +97,18 @@ function ConnectionCard({
   busy: boolean;
 }) {
   const latest = snapshots?.[0];
+  const env = envStyle(conn.environment);
   return (
-    <Card className="hover:border-foreground/20 transition-colors">
+    <Card className={cn("hover:border-foreground/20 transition-colors", env && `border-l-4 ${env.border}`)}>
       <CardContent className="p-4 space-y-3">
         <div className="flex items-center justify-between gap-2">
           <Link href={`/schemas/${conn.id}`} className="font-medium hover:underline truncate">
             {conn.name}
           </Link>
-          <Badge variant="secondary">{conn.engine}</Badge>
+          <div className="flex items-center gap-1.5">
+            {env && <Badge variant="outline" className={env.badge}>{env.label}</Badge>}
+            <Badge variant="secondary">{conn.engine}</Badge>
+          </div>
         </div>
 
         <div className="text-xs space-y-1">

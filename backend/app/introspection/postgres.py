@@ -8,6 +8,8 @@ from __future__ import annotations
 import logging
 import re
 import time
+from collections.abc import Callable
+from typing import Any
 
 from sqlalchemy import Engine, inspect, text
 
@@ -77,14 +79,29 @@ def _normalize_type(native: str) -> NormalizedType:
             return "unknown"
 
 
-def introspect(engine: Engine) -> Schema:
+def introspect(
+    engine: Engine,
+    *,
+    connection_name: str | None = None,
+    on_progress: Callable[[dict[str, Any]], None] | None = None,
+) -> Schema:
     started = time.monotonic()
+    # Tag every log line with the connection name so concurrent introspections are tellable apart.
+    tag = f"[{connection_name}] " if connection_name else ""
+
+    def _report(data: dict[str, Any]) -> None:
+        if on_progress is not None:
+            try:
+                on_progress({"connection": connection_name, **data})
+            except Exception:  # progress is best-effort — never break the introspection
+                pass
+
     insp = inspect(engine)
     with engine.connect() as conn:
         server_version = conn.execute(text("SHOW server_version")).scalar_one()
 
         all_schemas = [s for s in insp.get_schema_names() if s not in SYSTEM_SCHEMAS]
-        log.info("introspect: server=%s schemas=%s", server_version, all_schemas)
+        log.info("introspect: %sserver=%s schemas=%s", tag, server_version, all_schemas)
 
         tables: list[Table] = []
         views: list[View] = []
@@ -120,8 +137,9 @@ def introspect(engine: Engine) -> Schema:
         for schema_name in all_schemas:
             table_names = insp.get_table_names(schema=schema_name)
             view_names = insp.get_view_names(schema=schema_name)
+            n_tables, n_views = len(table_names), len(view_names)
             log.info(
-                "introspect: schema=%s tables=%d views=%d", schema_name, len(table_names), len(view_names)
+                "introspect: %sschema=%s tables=%d views=%d", tag, schema_name, n_tables, n_views
             )
             for i, table_name in enumerate(table_names, start=1):
                 t0 = time.monotonic()
@@ -137,17 +155,19 @@ def introspect(engine: Engine) -> Schema:
                         rls_enabled=rls_enabled.get((schema_name, table_name), False),
                     )
                 )
-                if i % 10 == 0 or i == len(table_names):
+                _report({"phase": "tables", "schema": schema_name, "current": i, "total": n_tables, "object": table_name})
+                if i % 10 == 0 or i == n_tables:
                     log.info(
-                        "introspect: %s table %d/%d (%s) %.2fs",
-                        schema_name, i, len(table_names), table_name, time.monotonic() - t0,
+                        "introspect: %s%s table %d/%d (%s) %.2fs",
+                        tag, schema_name, i, n_tables, table_name, time.monotonic() - t0,
                     )
 
             for j, view_name in enumerate(view_names, start=1):
                 definition = insp.get_view_definition(view_name, schema=schema_name) or ""
                 views.append(View(schema=schema_name, name=view_name, definition=definition))
-                if j % 10 == 0 or j == len(view_names):
-                    log.info("introspect: %s view %d/%d (%s)", schema_name, j, len(view_names), view_name)
+                _report({"phase": "views", "schema": schema_name, "current": j, "total": n_views, "object": view_name})
+                if j % 10 == 0 or j == n_views:
+                    log.info("introspect: %s%s view %d/%d (%s)", tag, schema_name, j, n_views, view_name)
 
         extensions = [
             r.extname for r in conn.execute(text("SELECT extname FROM pg_extension ORDER BY extname")).all()
@@ -175,9 +195,10 @@ def introspect(engine: Engine) -> Schema:
             ).all()
         ]
 
+    _report({"phase": "done", "current": len(tables), "total": len(tables), "object": ""})
     log.info(
-        "introspect: done in %.2fs (%d tables, %d views, %d rls policies)",
-        time.monotonic() - started, len(tables), len(views), len(rls_policies),
+        "introspect: %sdone in %.2fs (%d tables, %d views, %d rls policies)",
+        tag, time.monotonic() - started, len(tables), len(views), len(rls_policies),
     )
     return Schema(
         engine="postgres",

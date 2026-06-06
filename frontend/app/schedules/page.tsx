@@ -71,7 +71,7 @@ export default function SchedulesPage() {
               <TableHeader>
                 <TableRow>
                   <TableHead>Name</TableHead>
-                  <TableHead>Script</TableHead>
+                  <TableHead>Target</TableHead>
                   <TableHead className="font-mono">Cron</TableHead>
                   <TableHead>Timezone</TableHead>
                   <TableHead>Next run</TableHead>
@@ -88,7 +88,21 @@ export default function SchedulesPage() {
                         {s.name}
                       </Link>
                     </TableCell>
-                    <TableCell className="text-muted-foreground">{s.script_name ?? "—"}</TableCell>
+                    <TableCell className="text-muted-foreground">
+                      <span className="inline-flex items-center gap-2">
+                        <Badge variant="outline" className="font-normal">
+                          {s.target_kind === "tap" ? "Tap" : "SQL"}
+                        </Badge>
+                        <span className="truncate">
+                          {s.target_kind === "tap"
+                            ? s.tap_name ?? "—"
+                            : s.script_name ?? "—"}
+                          {s.target_kind === "tap" && s.tap_write_mode === "replace" && (
+                            <span className="ml-1 text-xs text-destructive">(truncate)</span>
+                          )}
+                        </span>
+                      </span>
+                    </TableCell>
                     <TableCell className="font-mono text-xs">{s.cron}</TableCell>
                     <TableCell className="text-muted-foreground text-xs">{s.timezone}</TableCell>
                     <TableCell className="text-muted-foreground whitespace-nowrap">

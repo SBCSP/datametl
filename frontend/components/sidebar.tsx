@@ -13,12 +13,15 @@ import {
   GitCompareArrows,
   History,
   LayoutDashboard,
+  LogOut,
   Network,
+  Radio,
   Settings,
   ShieldCheck,
   Workflow,
 } from "lucide-react";
 import { api } from "@/lib/api";
+import { clearToken } from "@/lib/auth";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -58,6 +61,7 @@ const NAV: { section: string; items: NavItem[] }[] = [
       { href: "/chat", label: "Mel", icon: Bot, matchPrefix: "/chat" },
       { href: "/scripts", label: "SQL Scripts", icon: FileCode, matchPrefix: "/scripts" },
       { href: "/pipelines", label: "Pipelines", icon: Network, matchPrefix: "/pipelines" },
+      { href: "/taps", label: "Taps", icon: Radio, matchPrefix: "/taps" },
       { href: "/schedules", label: "Schedules", icon: CalendarClock, matchPrefix: "/schedules" },
     ],
   },
@@ -77,6 +81,17 @@ export function Sidebar() {
     staleTime: 60_000,
     retry: false,
   });
+  const { data: auth } = useQuery({
+    queryKey: ["auth-status"],
+    queryFn: api.authStatus,
+    staleTime: 30_000,
+    retry: false,
+  });
+
+  const logout = () => {
+    clearToken();
+    window.location.href = "/login";
+  };
 
   return (
     <aside className="hidden md:flex md:w-60 md:flex-col md:fixed md:inset-y-0 md:z-40 border-r bg-card">
@@ -110,6 +125,16 @@ export function Sidebar() {
       </nav>
 
       <div className="border-t p-3 space-y-2">
+        {auth?.auth_enabled && auth.authenticated && (
+          <button
+            type="button"
+            onClick={logout}
+            className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          >
+            <LogOut className="h-4 w-4" />
+            <span className="truncate">Sign out{auth.username ? ` (${auth.username})` : ""}</span>
+          </button>
+        )}
         {/* Activity pill renders only when the worker is busy — gives users a global hint
             that something's running even if they navigated away from the originating page. */}
         <div className="flex items-center justify-center px-1 min-h-[1.5rem]">

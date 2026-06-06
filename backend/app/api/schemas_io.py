@@ -49,9 +49,13 @@ class RedactedPostgresCredentials(BaseModel):
     has_sslrootcert: bool = False
 
 
+Environment = Literal["development", "staging", "production"]
+
+
 class ConnectionCreate(BaseModel):
     name: str = Field(min_length=1, max_length=255)
     engine: Literal["postgres", "mysql"]
+    environment: Environment | None = None
     # Postgres + MySQL credentials are structurally identical (host/port/database/user/password
     # + optional sslmode/sslrootcert), so one model serves both; the connector interprets SSL.
     credentials: PostgresCredentials
@@ -59,6 +63,7 @@ class ConnectionCreate(BaseModel):
 
 class ConnectionUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=255)
+    environment: Environment | None = None
     credentials: PostgresCredentialsUpdate | None = None
 
 
@@ -66,6 +71,7 @@ class ConnectionRead(BaseModel):
     id: uuid.UUID
     name: str
     engine: str
+    environment: str | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -105,6 +111,18 @@ class SchemaSummary(BaseModel):
     view_count: int
 
 
+class SchemaDdlResponse(BaseModel):
+    """Lightweight CREATE-DDL generated from a snapshot, for preview before applying."""
+
+    sql: str
+    statement_count: int
+
+
+class SchemaApplyRequest(BaseModel):
+    connection_id: uuid.UUID
+    schema_override: str | None = None  # retarget all objects into one schema; null keeps source schemas
+
+
 # --- Comparison ---
 
 class ComparisonCreate(BaseModel):
@@ -124,6 +142,24 @@ class ComparisonRead(BaseModel):
     dest_schema: str | None = None
     diff: dict[str, Any]
     created_at: datetime
+
+
+class ComparisonSummary(BaseModel):
+    """List-row shape for /comparisons — resolves the source/dest databases so the UI shows
+    real names instead of opaque snapshot/comparison ids, plus a small drift summary."""
+
+    id: uuid.UUID
+    created_at: datetime
+    source_connection: str | None = None
+    source_engine: str | None = None
+    dest_connection: str | None = None
+    dest_engine: str | None = None
+    source_schema: str | None = None
+    dest_schema: str | None = None
+    ready: bool = False
+    common_tables: int = 0
+    only_in_source: int = 0
+    only_in_dest: int = 0
 
 
 class ConnectionSummary(BaseModel):
@@ -204,6 +240,7 @@ class JobStatusResponse(BaseModel):
     enqueue_time: str | None = None
     result: Any = None
     error: str | None = None
+    progress: dict[str, Any] | None = None  # live progress snapshot (e.g. introspection counts)
 
 
 # --- Migration ---
@@ -350,7 +387,9 @@ class ActivityEntry(BaseModel):
     """Unified shape for the /api/runs aggregator. Each row represents one background job
     or run across the system, no matter where it lives in storage."""
 
-    type: Literal["introspection", "comparison", "migration", "verification"]
+    type: Literal[
+        "introspection", "comparison", "migration", "verification", "pipeline", "scheduled", "api_fetch"
+    ]
     id: str
     label: str
     status: str
@@ -358,6 +397,154 @@ class ActivityEntry(BaseModel):
     finished_at: datetime | None = None
     detail: str | None = None
     href: str
+
+
+# --- Auth (simple single-user login) ---
+
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+
+class LoginResponse(BaseModel):
+    token: str
+    username: str
+    expires_at: int  # epoch seconds
+
+
+class AuthStatus(BaseModel):
+    auth_enabled: bool
+    authenticated: bool
+    username: str | None = None
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str = Field(min_length=1)
+
+
+# --- Tap (API data source) ---
+
+TapMethod = Literal["GET", "POST", "PUT", "PATCH", "DELETE"]
+TapWriteMode = Literal["append", "replace"]
+
+
+class TapCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=255)
+    url: str = Field(min_length=1)
+    method: TapMethod = "GET"
+    records_path: str = ""
+    headers: dict[str, str] = Field(default_factory=dict)
+    query_params: dict[str, str] = Field(default_factory=dict)
+    body: str | None = None
+    dest_connection_ids: list[uuid.UUID] = Field(default_factory=list)
+    dest_table: str = ""
+    write_mode: TapWriteMode = "append"
+
+
+class TapUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=255)
+    url: str | None = None
+    method: TapMethod | None = None
+    records_path: str | None = None
+    headers: dict[str, str] | None = None
+    query_params: dict[str, str] | None = None
+    body: str | None = None
+    dest_connection_ids: list[uuid.UUID] | None = None
+    dest_table: str | None = None
+    write_mode: TapWriteMode | None = None
+
+
+class TapRead(BaseModel):
+    id: uuid.UUID
+    name: str
+    url: str
+    method: str
+    records_path: str
+    headers: dict[str, str]  # values masked
+    query_params: dict[str, str]  # values masked
+    has_body: bool
+    dest_connection_ids: list[uuid.UUID]
+    dest_table: str
+    write_mode: str
+    created_at: datetime
+    updated_at: datetime
+
+
+class TapSummary(BaseModel):
+    id: uuid.UUID
+    name: str
+    url: str
+    method: str
+    dest_count: int
+    last_run_status: str | None = None
+    last_run_at: datetime | None = None
+    is_scheduled: bool = False
+    schedule_enabled: bool = False
+    updated_at: datetime
+
+
+class TapTestRequest(BaseModel):
+    url: str = Field(min_length=1)
+    method: TapMethod = "GET"
+    records_path: str = ""
+    headers: dict[str, str] = Field(default_factory=dict)
+    query_params: dict[str, str] = Field(default_factory=dict)
+    body: str | None = None
+
+
+class TapTestResult(BaseModel):
+    ok: bool
+    http_status: int | None = None
+    record_count: int = 0
+    sample: list[Any] = Field(default_factory=list)
+    error: str | None = None
+
+
+class TapRunRead(BaseModel):
+    id: uuid.UUID
+    tap_id: uuid.UUID
+    status: str
+    http_status: int | None = None
+    record_count: int | None = None
+    sample: list[Any] = Field(default_factory=list)
+    summary: list[dict[str, Any]] = Field(default_factory=list)
+    error: str | None = None
+    started_at: datetime
+    finished_at: datetime | None = None
+
+
+# --- Dashboard metrics ---
+
+class MetricsTotals(BaseModel):
+    connections: int
+    connections_by_env: dict[str, int]
+    snapshots: int
+    comparisons: int
+    scripts: int
+    pipelines: int
+    schedules: int
+    migration_runs: int
+    verification_runs: int
+    pipeline_runs: int
+    scheduled_runs: int
+
+
+class MetricsSeriesPoint(BaseModel):
+    date: str  # YYYY-MM-DD (UTC)
+    introspection: int = 0
+    comparison: int = 0
+    migration: int = 0
+    verification: int = 0
+    pipeline: int = 0
+    scheduled: int = 0
+
+
+class MetricsResponse(BaseModel):
+    days: int
+    totals: MetricsTotals
+    series: list[MetricsSeriesPoint]
+    status_breakdown: dict[str, int]  # run statuses across all run types within the window
 
 
 # --- SQL scripts ---
@@ -517,35 +704,50 @@ class McpActiveResponse(BaseModel):
 
 # --- Scheduled scripts (cron) ---
 
+ScheduleTargetKind = Literal["script", "tap"]
+
+
 class ScheduleCreate(BaseModel):
-    name: str | None = Field(default=None, max_length=255)  # defaults to the script's name
-    script_id: uuid.UUID
-    connection_ids: list[uuid.UUID] = Field(min_length=1)
+    name: str | None = Field(default=None, max_length=255)  # defaults to the script/tap name
+    target_kind: ScheduleTargetKind = "script"
+    # script schedules:
+    script_id: uuid.UUID | None = None
+    connection_ids: list[uuid.UUID] = Field(default_factory=list)
+    allow_writes: bool = False
+    # tap schedules:
+    tap_id: uuid.UUID | None = None
+    tap_write_mode: TapWriteMode | None = None
     cron: str = Field(min_length=1, max_length=255)
     timezone: str = "UTC"
-    allow_writes: bool = False
     enabled: bool = True
 
 
 class ScheduleUpdate(BaseModel):
     name: str | None = Field(default=None, max_length=255)
+    target_kind: ScheduleTargetKind | None = None
     script_id: uuid.UUID | None = None
-    connection_ids: list[uuid.UUID] | None = Field(default=None, min_length=1)
+    connection_ids: list[uuid.UUID] | None = None
+    allow_writes: bool | None = None
+    tap_id: uuid.UUID | None = None
+    tap_write_mode: TapWriteMode | None = None
     cron: str | None = Field(default=None, min_length=1, max_length=255)
     timezone: str | None = None
-    allow_writes: bool | None = None
     enabled: bool | None = None
 
 
 class ScheduleRead(BaseModel):
     id: uuid.UUID
     name: str
-    script_id: uuid.UUID
+    target_kind: str
+    script_id: uuid.UUID | None = None
     script_name: str | None = None
     connection_ids: list[uuid.UUID]
+    allow_writes: bool
+    tap_id: uuid.UUID | None = None
+    tap_name: str | None = None
+    tap_write_mode: str | None = None
     cron: str
     timezone: str
-    allow_writes: bool
     enabled: bool
     last_run_at: datetime | None = None
     next_run_at: datetime | None = None

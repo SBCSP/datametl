@@ -2,12 +2,16 @@ import type {
   Comparison,
   ComparisonEnqueued,
   ComparisonReport,
+  ComparisonSummary,
   Connection,
   ConnectionDetail,
   JobEnqueued,
   JobStatus,
   Mapping,
   ActivityEntry,
+  AuthStatus,
+  LoginResponse,
+  Metrics,
   AppSettings,
   ActiveMcp,
   ChatMessage,
@@ -26,6 +30,7 @@ import type {
   PostgresCredentials,
   PostgresCredentialsUpdate,
   SchemaSummary,
+  SchemaDdl,
   Snapshot,
   SnapshotSummary,
   SqlScript,
@@ -38,8 +43,42 @@ import type {
   PipelineRun,
   PipelineRunSummary,
   PipelineRunEnqueued,
+  Tap,
+  TapSummary,
+  TapRun,
+  TapTestResult,
   TestConnectionResult,
 } from "./types";
+
+/** Payload for creating/updating a Schedule (script or tap). */
+interface ScheduleWrite {
+  name?: string | null;
+  target_kind: "script" | "tap";
+  script_id?: string | null;
+  connection_ids?: string[];
+  allow_writes?: boolean;
+  tap_id?: string | null;
+  tap_write_mode?: "append" | "replace" | null;
+  cron: string;
+  timezone: string;
+  enabled: boolean;
+}
+
+/** Payload for creating/updating a Tap. */
+interface TapWrite {
+  name: string;
+  url: string;
+  method: string;
+  records_path: string;
+  headers: Record<string, string>;
+  query_params: Record<string, string>;
+  body?: string | null;
+  dest_connection_ids: string[];
+  dest_table: string;
+  write_mode: string;
+}
+
+import { clearToken, getToken } from "./auth";
 
 const BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
 
@@ -49,12 +88,28 @@ class ApiError extends Error {
   }
 }
 
+function authHeaders(): Record<string, string> {
+  const token = getToken();
+  return token ? { authorization: `Bearer ${token}` } : {};
+}
+
+/** On an expired/invalid session, drop the token and bounce to the login page. Skipped for the
+ * /api/auth/* endpoints so a failed login doesn't trigger a redirect loop. */
+function handle401(path: string): void {
+  if (path.startsWith("/api/auth/")) return;
+  clearToken();
+  if (typeof window !== "undefined" && window.location.pathname !== "/login") {
+    window.location.href = "/login";
+  }
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     ...init,
-    headers: { "content-type": "application/json", ...(init?.headers ?? {}) },
+    headers: { "content-type": "application/json", ...authHeaders(), ...(init?.headers ?? {}) },
     cache: "no-store",
   });
+  if (res.status === 401) handle401(path);
   if (!res.ok) throw new ApiError(res.status, await res.text());
   if (res.status === 204) return undefined as T;
   return (await res.json()) as T;
@@ -64,11 +119,15 @@ export const api = {
   // Connections
   listConnections: () => request<Connection[]>("/api/connections"),
   getConnection: (id: string) => request<ConnectionDetail>(`/api/connections/${id}`),
-  createConnection: (body: { name: string; engine: "postgres"; credentials: PostgresCredentials }) =>
-    request<Connection>("/api/connections", { method: "POST", body: JSON.stringify(body) }),
+  createConnection: (body: {
+    name: string;
+    engine: "postgres";
+    environment?: string | null;
+    credentials: PostgresCredentials;
+  }) => request<Connection>("/api/connections", { method: "POST", body: JSON.stringify(body) }),
   updateConnection: (
     id: string,
-    body: { name?: string; credentials?: PostgresCredentialsUpdate },
+    body: { name?: string; environment?: string | null; credentials?: PostgresCredentialsUpdate },
   ) =>
     request<ConnectionDetail>(`/api/connections/${id}`, {
       method: "PUT",
@@ -86,9 +145,15 @@ export const api = {
     request<SnapshotSummary[]>(`/api/connections/${connectionId}/snapshots`),
   getSnapshot: (id: string) => request<Snapshot>(`/api/snapshots/${id}`),
   getSnapshotSchemas: (id: string) => request<SchemaSummary[]>(`/api/snapshots/${id}/schemas`),
+  getSnapshotDdl: (id: string, schemaOverride?: string) =>
+    request<SchemaDdl>(
+      `/api/snapshots/${id}/ddl${schemaOverride ? `?schema_override=${encodeURIComponent(schemaOverride)}` : ""}`,
+    ),
+  applySchema: (id: string, body: { connection_id: string; schema_override?: string | null }) =>
+    request<JobEnqueued>(`/api/snapshots/${id}/apply`, { method: "POST", body: JSON.stringify(body) }),
 
   // Comparisons
-  listComparisons: () => request<Comparison[]>("/api/comparisons"),
+  listComparisons: () => request<ComparisonSummary[]>("/api/comparisons"),
   createComparison: (body: {
     source_snapshot_id: string;
     dest_snapshot_id: string;
@@ -160,27 +225,10 @@ export const api = {
   // Scheduled scripts (cron)
   listSchedules: () => request<Schedule[]>("/api/schedules"),
   getSchedule: (id: string) => request<Schedule>(`/api/schedules/${id}`),
-  createSchedule: (body: {
-    name?: string | null;
-    script_id: string;
-    connection_ids: string[];
-    cron: string;
-    timezone: string;
-    allow_writes: boolean;
-    enabled: boolean;
-  }) => request<Schedule>("/api/schedules", { method: "POST", body: JSON.stringify(body) }),
-  updateSchedule: (
-    id: string,
-    body: Partial<{
-      name: string | null;
-      script_id: string;
-      connection_ids: string[];
-      cron: string;
-      timezone: string;
-      allow_writes: boolean;
-      enabled: boolean;
-    }>,
-  ) => request<Schedule>(`/api/schedules/${id}`, { method: "PUT", body: JSON.stringify(body) }),
+  createSchedule: (body: ScheduleWrite) =>
+    request<Schedule>("/api/schedules", { method: "POST", body: JSON.stringify(body) }),
+  updateSchedule: (id: string, body: Partial<ScheduleWrite>) =>
+    request<Schedule>(`/api/schedules/${id}`, { method: "PUT", body: JSON.stringify(body) }),
   deleteSchedule: (id: string) => request<void>(`/api/schedules/${id}`, { method: "DELETE" }),
   runScheduleNow: (id: string) =>
     request<JobEnqueued>(`/api/schedules/${id}/run-now`, { method: "POST" }),
@@ -207,8 +255,44 @@ export const api = {
   listPipelineRuns: (id: string) =>
     request<PipelineRunSummary[]>(`/api/pipelines/${id}/runs`),
 
+  // Taps (API data sources)
+  listTaps: () => request<TapSummary[]>("/api/taps"),
+  getTap: (id: string) => request<Tap>(`/api/taps/${id}`),
+  createTap: (body: TapWrite) =>
+    request<Tap>("/api/taps", { method: "POST", body: JSON.stringify(body) }),
+  updateTap: (id: string, body: Partial<TapWrite>) =>
+    request<Tap>(`/api/taps/${id}`, { method: "PUT", body: JSON.stringify(body) }),
+  deleteTap: (id: string) => request<void>(`/api/taps/${id}`, { method: "DELETE" }),
+  testTap: (body: {
+    url: string;
+    method: string;
+    records_path?: string;
+    headers?: Record<string, string>;
+    query_params?: Record<string, string>;
+    body?: string | null;
+  }) => request<TapTestResult>("/api/taps/test", { method: "POST", body: JSON.stringify(body) }),
+  fetchTap: (id: string) =>
+    request<JobEnqueued>(`/api/taps/${id}/fetch`, { method: "POST" }),
+  listTapRuns: (id: string) => request<TapRun[]>(`/api/taps/${id}/runs`),
+
   // Activity (unified runs feed)
   listActivity: () => request<ActivityEntry[]>("/api/activity"),
+
+  // Dashboard metrics
+  getMetrics: (days = 14) => request<Metrics>(`/api/metrics?days=${days}`),
+
+  // Auth
+  authStatus: () => request<AuthStatus>("/api/auth/status"),
+  login: (username: string, password: string) =>
+    request<LoginResponse>("/api/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ username, password }),
+    }),
+  changePassword: (current_password: string, new_password: string) =>
+    request<void>("/api/auth/change-password", {
+      method: "POST",
+      body: JSON.stringify({ current_password, new_password }),
+    }),
 
   // Settings
   getSettings: () => request<AppSettings>("/api/settings"),
@@ -254,11 +338,12 @@ async function streamPost(
 ): Promise<void> {
   const res = await fetch(`${BASE}${path}`, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", ...authHeaders() },
     body: JSON.stringify(body),
     cache: "no-store",
     signal: opts.signal,
   });
+  if (res.status === 401) handle401(path);
   if (!res.ok) throw new ApiError(res.status, await res.text());
   if (!res.body) return;
 

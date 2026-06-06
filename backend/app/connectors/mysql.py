@@ -99,7 +99,11 @@ class MySQLConnector(Connector):
         except Exception as e:  # noqa: BLE001 — surface a sanitized message, never the DSN
             return ConnectionTestResult(ok=False, detail=str(e))
 
-    def introspect(self) -> Schema:
+    def introspect(
+        self, *, connection_name: str | None = None, on_progress: Any = None
+    ) -> Schema:
+        # MySQL introspection is inert (no live progress reporting yet); params accepted for
+        # interface parity with PostgresConnector.
         return my_introspect.introspect(self._engine())
 
     def run_statements(

@@ -15,6 +15,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { PageHeader } from "@/components/page-header";
+import { ENVIRONMENTS, type Environment, envStyle } from "@/lib/environments";
 
 const SSL_MODES = ["disable", "allow", "prefer", "require", "verify-ca", "verify-full"] as const;
 type SslMode = (typeof SSL_MODES)[number];
@@ -37,6 +38,7 @@ export default function EditConnectionPage({ params }: { params: Promise<{ id: s
     database: "",
     user: "",
     password: "",
+    environment: "" as Environment | "",
     sslmode: "" as SslMode | "",
     sslrootcert: "",
     replaceCert: false,
@@ -52,6 +54,7 @@ export default function EditConnectionPage({ params }: { params: Promise<{ id: s
       port: data.redacted_credentials.port,
       database: data.redacted_credentials.database,
       user: data.redacted_credentials.user,
+      environment: (data.environment as Environment) ?? "",
       sslmode: (data.redacted_credentials.sslmode as SslMode) ?? "",
     }));
   }, [data]);
@@ -91,11 +94,12 @@ export default function EditConnectionPage({ params }: { params: Promise<{ id: s
       if (form.password) credUpdate.password = form.password;
       if (showCertEditor && form.sslrootcert) credUpdate.sslrootcert = form.sslrootcert;
 
-      const body: { name?: string; credentials?: PostgresCredentialsUpdate } = {};
+      const body: { name?: string; environment?: string | null; credentials?: PostgresCredentialsUpdate } = {};
       if (form.name !== data.name) body.name = form.name;
+      if ((form.environment || null) !== (data.environment ?? null)) body.environment = form.environment || null;
       if (Object.keys(credUpdate).length > 0) body.credentials = credUpdate;
 
-      if (!body.name && !body.credentials) throw new Error("Nothing to update");
+      if (Object.keys(body).length === 0) throw new Error("Nothing to update");
 
       return api.updateConnection(id, body);
     },
@@ -135,6 +139,26 @@ export default function EditConnectionPage({ params }: { params: Promise<{ id: s
           <CardContent className="grid grid-cols-2 gap-4">
             <Field label="Name" col2>
               <Input value={form.name} onChange={(e) => set("name", e.target.value)} />
+            </Field>
+            <Field label="Environment" col2>
+              <Select value={form.environment} onValueChange={(v) => set("environment", v as Environment)}>
+                <SelectTrigger>
+                  <SelectValue placeholder="(none)" />
+                </SelectTrigger>
+                <SelectContent>
+                  {ENVIRONMENTS.map((e) => {
+                    const st = envStyle(e.value)!;
+                    return (
+                      <SelectItem key={e.value} value={e.value}>
+                        <span className="flex items-center gap-2">
+                          <span className={`h-2.5 w-2.5 rounded-full ${st.dot}`} />
+                          {e.label}
+                        </span>
+                      </SelectItem>
+                    );
+                  })}
+                </SelectContent>
+              </Select>
             </Field>
             <Field label="Host">
               <Input value={form.host} onChange={(e) => set("host", e.target.value)} />

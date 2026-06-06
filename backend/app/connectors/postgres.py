@@ -95,8 +95,12 @@ class PostgresConnector(Connector):
         except Exception as e:
             return ConnectionTestResult(ok=False, detail=str(e))
 
-    def introspect(self) -> Schema:
-        return pg_introspect.introspect(self._engine())
+    def introspect(
+        self, *, connection_name: str | None = None, on_progress: Any = None
+    ) -> Schema:
+        return pg_introspect.introspect(
+            self._engine(), connection_name=connection_name, on_progress=on_progress
+        )
 
     def run_statements(
         self,

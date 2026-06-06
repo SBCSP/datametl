@@ -8,7 +8,7 @@ and "what failed in the last few hours" without having to hunt through five diff
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, Query
@@ -19,8 +19,11 @@ from app.api.schemas_io import ActivityEntry
 from app.db import get_db
 from app.models.comparison import Comparison
 from app.models.connection import Connection
+from app.models.introspection_run import IntrospectionRun
 from app.models.migration_run import MigrationRun
-from app.models.schema_snapshot import SchemaSnapshot
+from app.models.pipeline import Pipeline, PipelineRun
+from app.models.scheduled_script import ScheduledRun, ScheduledScript
+from app.models.tap import Tap, TapRun
 from app.models.verification_run import VerificationRun
 
 router = APIRouter(prefix="/api/activity", tags=["activity"])
@@ -38,34 +41,37 @@ def list_activity(
     """
     out: list[ActivityEntry] = []
 
-    # Introspections — each successful snapshot was an introspect job.
-    snap_rows = list(
+    # Introspections — tracked as runs so an in-flight introspect shows as 'running'.
+    intro_rows = list(
         db.execute(
-            select(SchemaSnapshot)
-            .order_by(SchemaSnapshot.captured_at.desc())
+            select(IntrospectionRun)
+            .order_by(IntrospectionRun.started_at.desc())
             .limit(limit_per_type)
         ).scalars()
     )
-    conn_ids = {s.connection_id for s in snap_rows}
+    conn_ids = {r.connection_id for r in intro_rows}
     conns: dict[Any, Connection] = {
-        c.id: c
-        for c in db.execute(select(Connection).where(Connection.id.in_(conn_ids))).scalars()
+        cn.id: cn
+        for cn in db.execute(select(Connection).where(Connection.id.in_(conn_ids))).scalars()
     }
-    for s in snap_rows:
-        c = conns.get(s.connection_id)
-        sch = s.normalized_schema or {}
-        table_count = len(sch.get("tables", []))
-        warn_count = len(s.warnings or [])
+    for r in intro_rows:
+        conn = conns.get(r.connection_id)
+        if r.status == "succeeded":
+            detail = f"{r.table_count or 0} tables, {r.warning_count or 0} warnings"
+        elif r.status == "failed":
+            detail = r.error or "failed"
+        else:
+            detail = "introspecting…"
         out.append(
             ActivityEntry(
                 type="introspection",
-                id=str(s.id),
-                label=f"Introspect: {c.name if c else s.connection_id}",
-                status="succeeded",
-                started_at=s.captured_at,
-                finished_at=s.captured_at,
-                detail=f"{table_count} tables, {warn_count} warnings",
-                href=f"/schemas/{s.connection_id}",
+                id=str(r.id),
+                label=f"Introspect: {conn.name if conn else r.connection_id}",
+                status=r.status,
+                started_at=r.started_at,
+                finished_at=r.finished_at,
+                detail=detail,
+                href=f"/schemas/{r.connection_id}",
             )
         )
 
@@ -141,9 +147,85 @@ def list_activity(
             )
         )
 
+    # Pipeline runs.
+    pipe_rows = list(
+        db.execute(select(PipelineRun).order_by(PipelineRun.created_at.desc()).limit(limit_per_type)).scalars()
+    )
+    pipe_ids = {pr.pipeline_id for pr in pipe_rows}
+    pipes: dict[Any, Pipeline] = {
+        p2.id: p2 for p2 in db.execute(select(Pipeline).where(Pipeline.id.in_(pipe_ids))).scalars()
+    }
+    for pr in pipe_rows:
+        pipe = pipes.get(pr.pipeline_id)
+        out.append(
+            ActivityEntry(
+                type="pipeline",
+                id=str(pr.id),
+                label=f"Pipeline: {pipe.name if pipe else pr.pipeline_id}",
+                status=pr.status,
+                started_at=pr.started_at or pr.created_at,
+                finished_at=pr.finished_at,
+                detail=pr.error or None,
+                href=f"/pipelines/{pr.pipeline_id}",
+            )
+        )
+
+    # Scheduled runs.
+    sched_rows = list(
+        db.execute(select(ScheduledRun).order_by(ScheduledRun.started_at.desc()).limit(limit_per_type)).scalars()
+    )
+    sched_ids = {sr.schedule_id for sr in sched_rows}
+    scheds: dict[Any, ScheduledScript] = {
+        s2.id: s2 for s2 in db.execute(select(ScheduledScript).where(ScheduledScript.id.in_(sched_ids))).scalars()
+    }
+    for sr in sched_rows:
+        sci = scheds.get(sr.schedule_id)
+        out.append(
+            ActivityEntry(
+                type="scheduled",
+                id=str(sr.id),
+                label=f"Schedule: {sci.name if sci else sr.schedule_id}",
+                status=sr.status,
+                started_at=sr.started_at,
+                finished_at=sr.finished_at,
+                detail=sr.error or None,
+                href="/schedules",
+            )
+        )
+
+    # Tap (API) fetches.
+    tap_rows = list(
+        db.execute(select(TapRun).order_by(TapRun.started_at.desc()).limit(limit_per_type)).scalars()
+    )
+    tap_ids = {tr.tap_id for tr in tap_rows}
+    taps: dict[Any, Tap] = {
+        tp.id: tp for tp in db.execute(select(Tap).where(Tap.id.in_(tap_ids))).scalars()
+    }
+    for tr in tap_rows:
+        tp = taps.get(tr.tap_id)
+        if tr.status == "succeeded":
+            n = tr.record_count or 0
+            detail = f"{n} record{'' if n == 1 else 's'}"
+        elif tr.status == "failed":
+            detail = tr.error or "failed"
+        else:
+            detail = "fetching…"
+        out.append(
+            ActivityEntry(
+                type="api_fetch",
+                id=str(tr.id),
+                label=f"Tap: {tp.name if tp else tr.tap_id}",
+                status=tr.status,
+                started_at=tr.started_at,
+                finished_at=tr.finished_at,
+                detail=detail,
+                href=f"/taps/{tr.tap_id}",
+            )
+        )
+
     # Sort newest first. Every entry has at least one timestamp; use a UTC-anchored
     # min as a safety net so the comparator never sees a None.
-    epoch = datetime.min.replace(tzinfo=timezone.utc)
+    epoch = datetime.min.replace(tzinfo=UTC)
 
     def _sort_key(e: ActivityEntry) -> datetime:
         return e.finished_at or e.started_at or epoch

@@ -5,10 +5,13 @@ import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import {
   ArrowRightLeft,
+  CalendarClock,
   Database,
   GitCompareArrows,
   History,
   Loader2,
+  Network,
+  Radio,
   ShieldCheck,
 } from "lucide-react";
 import { api } from "@/lib/api";
@@ -24,6 +27,9 @@ const TYPE_META: Record<ActivityType, { icon: React.ComponentType<{ className?: 
   comparison: { icon: GitCompareArrows, label: "Compare" },
   migration: { icon: ArrowRightLeft, label: "Migrate" },
   verification: { icon: ShieldCheck, label: "Verify" },
+  pipeline: { icon: Network, label: "Pipeline" },
+  scheduled: { icon: CalendarClock, label: "Schedule" },
+  api_fetch: { icon: Radio, label: "Tap" },
 };
 
 const STATUS_VARIANT: Record<string, "secondary" | "warning" | "success" | "destructive" | "outline"> = {
@@ -40,7 +46,15 @@ const STATUS_VARIANT: Record<string, "secondary" | "warning" | "success" | "dest
 };
 
 const ALL = "all" as const;
-const TYPES: (ActivityType | typeof ALL)[] = [ALL, "introspection", "comparison", "migration", "verification"];
+const TYPES: (ActivityType | typeof ALL)[] = [
+  ALL,
+  "introspection",
+  "comparison",
+  "migration",
+  "verification",
+  "pipeline",
+  "scheduled",
+];
 
 export default function RunsPage() {
   const { data, isLoading } = useQuery({

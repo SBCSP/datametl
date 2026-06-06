@@ -20,6 +20,7 @@ dependencies = [
     "anthropic>=0.40",
     "pymysql>=1.1",
     "croniter>=2.0",
+    "httpx>=0.28",
 ]
 
 [dependency-groups]

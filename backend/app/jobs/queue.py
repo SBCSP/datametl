@@ -8,6 +8,7 @@ from arq.connections import ArqRedis, RedisSettings
 from arq.jobs import Job, JobStatus
 
 from app.config import settings
+from app.jobs import progress as progress_mod
 
 
 async def get_pool() -> ArqRedis:
@@ -36,8 +37,14 @@ async def status(job_id: str) -> dict[str, Any]:
         if s == JobStatus.complete:
             try:
                 result = await job.result(timeout=0.1)
-            except Exception as e:  # noqa: BLE001 — arq raises whatever the function raised
+            except Exception as e:
                 error = str(e)
+        # Live progress snapshot (best-effort), written by the worker as it runs.
+        progress = None
+        try:
+            progress = progress_mod.parse(await pool.get(progress_mod.key(job_id)))
+        except Exception:
+            progress = None
         return {
             "id": job_id,
             "status": s.value,
@@ -45,6 +52,7 @@ async def status(job_id: str) -> dict[str, Any]:
             "enqueue_time": info.enqueue_time.isoformat() if info and info.enqueue_time else None,
             "result": result,
             "error": error,
+            "progress": progress,
         }
     finally:
         await pool.close()
