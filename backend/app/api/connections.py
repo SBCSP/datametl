@@ -17,6 +17,7 @@ from app.api.schemas_io import (
     TestConnectionResult,
 )
 from app.connectors import for_engine
+from app.license.gates import require_engine_allowed
 from app.crypto import vault
 from app.db import get_db
 from app.jobs.queue import enqueue
@@ -44,6 +45,7 @@ def list_connections(db: Session = Depends(get_db)) -> list[Connection]:
 
 @router.post("", response_model=ConnectionRead, status_code=status.HTTP_201_CREATED)
 def create_connection(payload: ConnectionCreate, db: Session = Depends(get_db)) -> Connection:
+    require_engine_allowed(db, payload.engine)
     conn = Connection(
         name=payload.name,
         engine=payload.engine,

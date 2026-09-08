@@ -2,9 +2,9 @@
 
 import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Database, Upload } from "lucide-react";
+import { Database, Lock, Upload } from "lucide-react";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { ENGINES, engineMeta, type Engine } from "@/lib/engines";
@@ -22,6 +22,8 @@ type SslMode = (typeof SSL_MODES)[number];
 
 export default function NewConnectionPage() {
   const router = useRouter();
+  const { data: settings } = useQuery({ queryKey: ["settings"], queryFn: api.getSettings });
+  const proEngines = settings?.license?.can_use_mysql_mssql ?? false;
   const certFileInput = useRef<HTMLInputElement>(null);
   const [engine, setEngine] = useState<Engine | "">("");
   const [form, setForm] = useState({
@@ -116,19 +118,24 @@ export default function NewConnectionPage() {
         <Card>
           <CardHeader>
             <CardTitle>Database engine</CardTitle>
-            <CardDescription>Required — pick PostgreSQL, MySQL, or SQL Server before filling credentials.</CardDescription>
+            <CardDescription>Required — pick an engine before filling credentials. MySQL and SQL Server need Pro.</CardDescription>
           </CardHeader>
           <CardContent>
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
               {ENGINES.map((e) => {
                 const selected = engine === e.value;
+                const needsPro = e.value === "mysql" || e.value === "mssql";
+                const locked = needsPro && !proEngines;
                 return (
                   <button
                     key={e.value}
                     type="button"
-                    onClick={() => pickEngine(e.value)}
+                    disabled={locked}
+                    onClick={() => !locked && pickEngine(e.value)}
+                    title={locked ? "Requires DataMETL Pro — activate a license in Settings" : undefined}
                     className={cn(
                       "flex flex-col items-start gap-2 rounded-lg border p-4 text-left transition-colors",
+                      locked && "opacity-60 cursor-not-allowed",
                       selected
                         ? "border-primary bg-accent ring-1 ring-primary"
                         : "hover:bg-accent/50 text-muted-foreground hover:text-foreground",
@@ -137,6 +144,12 @@ export default function NewConnectionPage() {
                     <div className="flex items-center gap-2">
                       <Database className={cn("h-5 w-5", selected ? "text-primary" : "")} />
                       <span className="font-medium text-foreground">{e.label}</span>
+                      {needsPro && (
+                        <span className="text-[10px] uppercase tracking-wide rounded bg-muted px-1.5 py-0.5 text-muted-foreground flex items-center gap-1">
+                          {locked ? <Lock className="h-3 w-3" /> : null}
+                          Pro
+                        </span>
+                      )}
                     </div>
                     <p className="text-xs text-muted-foreground leading-relaxed">{e.description}</p>
                     <p className="text-xs font-mono text-muted-foreground">

@@ -6,11 +6,13 @@ COMPOSE_SAMPLES := $(COMPOSE) -f $(ROOT)/infra/docker-compose.samples.yml --prof
 COMPOSE_ENGINES := $(COMPOSE) -f $(ROOT)/infra/docker-compose.engines.yml
 COMPOSE_ALL := $(COMPOSE) -f $(ROOT)/infra/docker-compose.samples.yml -f $(ROOT)/infra/docker-compose.engines.yml --profile samples --profile mysql --profile mssql --profile engines
 
-.PHONY: help ensure-env up up-samples up-mysql up-mssql up-engines urls db-urls down logs ps build rebuild migrate revision shell-backend shell-db psql redis-cli test lint typecheck fmt clean key release deploy-up deploy-pull deploy-down deploy-build-local
+.PHONY: help ensure-env up license-issue license-keypair up-samples up-mysql up-mssql up-engines urls db-urls down logs ps build rebuild migrate revision shell-backend shell-db psql redis-cli test lint typecheck fmt clean key release deploy-up deploy-pull deploy-down deploy-build-local
 
 help:
 	@echo "DataMETL — common commands"
 	@echo "  make key            Generate a Fernet encryption key (paste into .env)"
+	@echo "  make license-keypair  Generate Ed25519 license signing keypair"
+	@echo "  make license-issue    Sign a Pro license (needs LICENSE_SIGNING_KEY)"
 	@echo "  make ensure-env     Create .env from example if missing (sets ENCRYPTION_KEY)"
 	@echo "  make up             Build (if needed) and start app stack"
 	@echo "  make up-samples     Build (if needed) and start app stack + sample source/dest databases"
@@ -43,6 +45,22 @@ help:
 key:
 	@python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())" 2>/dev/null \
 	  || python3 -c "import base64,os; print(base64.urlsafe_b64encode(os.urandom(32)).decode())"
+
+# Offline license tooling (Ed25519). Private key never goes in git — export LICENSE_SIGNING_KEY.
+# Runs inside the backend container so cryptography is available.
+license-keypair:
+	$(COMPOSE) run --rm --no-deps -v $(ROOT)/scripts:/scripts:ro backend \
+	  python /scripts/issue_license.py --gen-keypair
+
+license-issue:
+	@if [ -z "$$LICENSE_SIGNING_KEY" ]; then \
+	  echo "Set LICENSE_SIGNING_KEY first (make license-keypair, then export the private key)."; \
+	  exit 1; \
+	fi
+	$(COMPOSE) run --rm --no-deps -e LICENSE_SIGNING_KEY -e LICENSE_PUBLIC_KEY \
+	  -v $(ROOT)/scripts:/scripts:ro backend \
+	  python /scripts/issue_license.py --tier $${TIER:-pro} \
+	  $(if $(EMAIL),--email $(EMAIL),) $(if $(EXPIRES),--expires $(EXPIRES),)
 
 # Create .env from the example if needed, and refuse a placeholder ENCRYPTION_KEY.
 ensure-env:

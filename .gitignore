@@ -41,3 +41,7 @@ next-env.d.ts
 # Local-only working assets (logos / screenshots not yet wired into the README).
 # Force-add (`git add -f images/foo.jpg`) when you're ready to commit one.
 images/
+
+# Local license issuer private key (never commit)
+.license_signing_key
+LICENSE_SIGNING_KEY

@@ -125,6 +125,50 @@ End users then run the one-liner above and pull the freshly-published images.
 - Deploy compose disables OpenAPI `/docs` by default (`DOCS_ENABLED=false`). Set `DOCS_ENABLED=true` only on trusted networks.
 - Protect `/metrics` with `METRICS_TOKEN` when the scrape endpoint is reachable beyond a trusted network.
 
+
+## Licensing (Community vs Pro)
+
+DataMETL Phase 1 uses **offline-verifiable signed license keys** (Ed25519). The app never embeds Stripe secret keys; Checkout/webhooks are not in this build.
+
+| Tier | What you get |
+|---|---|
+| **Community** (no key) | Postgres migrate / introspect / compare / verify. Mel is allowed, but **tool approval is forced to `always`** (every Mel DB tool needs Approve in chat). |
+| **Pro** (signed key) | Full Mel approval modes (`run_sql_only` / `always` / `auto`) + MySQL and SQL Server connectors. |
+| **Team** | Entitlement stub only (no SSO yet). |
+
+### Activate in the UI
+
+1. Open **Settings → License**
+2. Paste a `dmtl1.…` key → **Activate**
+3. Status shows tier, expiry (or perpetual), and email if present
+4. **Deactivate** clears the stored key (encrypted in `app_settings` like the Anthropic key)
+
+### Local docker without a key
+
+Set in `.env` (wired through compose):
+
+```bash
+DATAMETL_LICENSE_DEV_BYPASS=true
+```
+
+That unlocks Pro features for development only — never enable in production.
+
+### Issue a Pro key (maintainers)
+
+```bash
+# Generate a signing keypair (keep the private key offline; embed/public-override the public key)
+make license-keypair
+# export LICENSE_SIGNING_KEY=…   # from the output; never commit it
+
+# Sign a perpetual Pro key
+make license-issue EMAIL=you@example.com
+
+# Or with expiry
+make license-issue EMAIL=you@example.com EXPIRES=+1y
+```
+
+Optional: override the embedded verify key with `LICENSE_PUBLIC_KEY` (base64url 32-byte Ed25519 public key).
+
 ## Architecture
 
 See [CLAUDE.md](CLAUDE.md) for the architectural overview that future Claude Code sessions use.

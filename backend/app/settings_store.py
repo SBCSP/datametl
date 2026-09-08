@@ -1,4 +1,4 @@
-"""Persisted, encrypted app settings (currently just the Anthropic API key).
+"""Persisted, encrypted app settings (Anthropic API key, Mel prefs, license key).
 
 Values are stored Fernet-encrypted (via the same `vault` used for connection credentials) in
 the `app_settings` table, keyed by a short string. Never returns ciphertext or the raw key from
@@ -78,3 +78,41 @@ def set_mel_tool_approval(db: Session, mode: str) -> str:
         row.encrypted_value = encrypted
     db.commit()
     return mode
+
+
+# --- License key (signed token; Fernet-wrapped like the Anthropic key) ---
+
+_LICENSE_KEY = "license_key"
+
+
+def get_license_key(db: Session) -> str | None:
+    row = db.get(AppSetting, _LICENSE_KEY)
+    if row is None:
+        return None
+    value = vault.decrypt(row.encrypted_value).get(_LICENSE_KEY)
+    return value or None
+
+
+def has_license_key(db: Session) -> bool:
+    return get_license_key(db) is not None
+
+
+def set_license_key(db: Session, token: str | None) -> None:
+    """Persist a verified license token, or clear when blank/None."""
+    if not token or not token.strip():
+        clear_license_key(db)
+        return
+    encrypted = vault.encrypt({_LICENSE_KEY: token.strip()})
+    row = db.get(AppSetting, _LICENSE_KEY)
+    if row is None:
+        db.add(AppSetting(key=_LICENSE_KEY, encrypted_value=encrypted))
+    else:
+        row.encrypted_value = encrypted
+    db.commit()
+
+
+def clear_license_key(db: Session) -> None:
+    row = db.get(AppSetting, _LICENSE_KEY)
+    if row is not None:
+        db.delete(row)
+        db.commit()

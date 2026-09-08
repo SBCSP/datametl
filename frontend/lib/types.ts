@@ -461,11 +461,28 @@ export interface AppSettings {
   auth_enabled: boolean;
   auth_username: string | null;
   auth_token_ttl_hours: number;
-  /** run_sql_only (default) | always | auto */
+  /** run_sql_only (default) | always | auto — Community forces always */
   mel_tool_approval: "run_sql_only" | "always" | "auto";
+  license: LicenseStatus | null;
 }
 
 export type MelToolApprovalMode = AppSettings["mel_tool_approval"];
+
+export interface LicenseStatus {
+  tier: "community" | "pro" | "team";
+  active: boolean;
+  source: "none" | "key" | "dev_bypass";
+  issued_at: string | null;
+  expires_at: string | null;
+  email: string | null;
+  seat_id: string | null;
+  instance_id: string | null;
+  message: string | null;
+  community_mel_limit: string;
+  can_use_mysql_mssql: boolean;
+  can_choose_mel_approval: boolean;
+  license_key_set: boolean;
+}
 
 export interface MelToolInvocation {
   id: string;

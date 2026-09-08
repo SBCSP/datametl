@@ -48,6 +48,7 @@ from app.mcp.approval import (
 from app.mcp.state import get_active_connection
 from app.models.chat_session import ChatSession
 from app.models.mel_tool_invocation import MelToolInvocation
+from app.license.entitlements import get_entitlements
 from app.settings_store import get_anthropic_key, get_mel_tool_approval
 
 router = APIRouter(prefix="/api/chat", tags=["chat"])
@@ -417,7 +418,8 @@ async def chat_stream(payload: ChatRequest, db: Session = Depends(get_db)) -> St
     model = payload.model
     session_id = payload.session_id
     active = get_active_connection(db)
-    approval_mode = get_mel_tool_approval(db)
+    ents = get_entitlements(db)
+    approval_mode = ents.effective_mel_tool_approval(get_mel_tool_approval(db))
 
     if active is not None:
         creds = vault.decrypt(active.encrypted_credentials)

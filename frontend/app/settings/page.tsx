@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Bot, CheckCircle2, ExternalLink, KeyRound, Lock, Server, Sparkles, XCircle } from "lucide-react";
+import { Bot, CheckCircle2, ExternalLink, KeyRound, Lock, Server, Sparkles, XCircle, ShieldCheck } from "lucide-react";
 import type { MelToolApprovalMode } from "@/lib/types";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { api, apiBaseUrl } from "@/lib/api";
@@ -38,6 +38,25 @@ export default function SettingsPage() {
     onSuccess: (r) => {
       qc.invalidateQueries({ queryKey: ["settings"] });
       toast.success(`Mel tool approval: ${r.mel_tool_approval.replace(/_/g, " ")}`);
+    },
+    onError: (e) => toast.error(String(e)),
+  });
+
+  const [licenseKey, setLicenseKey] = useState("");
+  const activateLicense = useMutation({
+    mutationFn: (key: string) => api.activateLicense(key),
+    onSuccess: (r) => {
+      setLicenseKey("");
+      qc.invalidateQueries({ queryKey: ["settings"] });
+      toast.success(`License activated: ${r.license.tier}`);
+    },
+    onError: (e) => toast.error(String(e)),
+  });
+  const deactivateLicense = useMutation({
+    mutationFn: () => api.deactivateLicense(),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["settings"] });
+      toast.success("License deactivated — back to Community");
     },
     onError: (e) => toast.error(String(e)),
   });
@@ -227,6 +246,87 @@ export default function SettingsPage() {
           </Card>
 
 
+
+          {/* License */}
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base flex items-center gap-2">
+                <ShieldCheck className="h-4 w-4" /> License
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3 text-sm">
+              <Row label="Tier">
+                <Badge variant={data.license?.active ? "success" : "secondary"}>
+                  {data.license?.tier ?? "community"}
+                </Badge>
+              </Row>
+              <Row label="Status">
+                {data.license?.active ? (
+                  <Badge variant="success">
+                    <CheckCircle2 className="h-3 w-3 mr-1" /> active
+                    {data.license.source === "dev_bypass" ? " (dev bypass)" : ""}
+                  </Badge>
+                ) : (
+                  <Badge variant="secondary">Community</Badge>
+                )}
+              </Row>
+              {data.license?.email && (
+                <Row label="Email">
+                  <span className="text-xs">{data.license.email}</span>
+                </Row>
+              )}
+              <Row label="Expires">
+                <span className="text-xs font-mono">
+                  {data.license?.expires_at
+                    ? new Date(data.license.expires_at).toLocaleString()
+                    : data.license?.active
+                      ? "perpetual"
+                      : "—"}
+                </span>
+              </Row>
+              {data.license?.message && (
+                <p className="text-xs text-destructive">{data.license.message}</p>
+              )}
+              <div className="space-y-1.5">
+                <Label htmlFor="license-key">Activate license key</Label>
+                <Input
+                  id="license-key"
+                  type="password"
+                  placeholder="dmtl1.…"
+                  autoComplete="off"
+                  value={licenseKey}
+                  onChange={(e) => setLicenseKey(e.target.value)}
+                />
+              </div>
+              <div className="flex gap-2 flex-wrap">
+                <Button
+                  size="sm"
+                  onClick={() => activateLicense.mutate(licenseKey)}
+                  disabled={!licenseKey.trim() || activateLicense.isPending}
+                >
+                  Activate
+                </Button>
+                {(data.license?.license_key_set || data.license?.source === "key") && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => deactivateLicense.mutate()}
+                    disabled={deactivateLicense.isPending}
+                  >
+                    Deactivate
+                  </Button>
+                )}
+              </div>
+              <p className="text-xs text-muted-foreground pt-2 border-t">
+                <strong>Community</strong> (no key): Postgres migrate/introspect/compare/verify;
+                Mel allowed with tool approval forced to <code className="font-mono">always</code>.{" "}
+                <strong>Pro</strong>: full Mel approval modes + MySQL/SQL Server connectors.
+                Keys are offline-verifiable (Ed25519) and stored encrypted like the Anthropic key.
+                Stripe Checkout is not in this build — paste a signed key from your issuer.
+              </p>
+            </CardContent>
+          </Card>
+
           {/* Mel / trust */}
           <Card>
             <CardHeader className="pb-3">
@@ -238,9 +338,9 @@ export default function SettingsPage() {
               <div className="space-y-1.5">
                 <Label>Tool approval</Label>
                 <Select
-                  value={data.mel_tool_approval ?? "run_sql_only"}
+                  value={data.mel_tool_approval ?? "always"}
                   onValueChange={(v) => saveMelApproval.mutate(v as MelToolApprovalMode)}
-                  disabled={saveMelApproval.isPending}
+                  disabled={saveMelApproval.isPending || !data.license?.can_choose_mel_approval}
                 >
                   <SelectTrigger>
                     <SelectValue />
@@ -252,6 +352,12 @@ export default function SettingsPage() {
                   </SelectContent>
                 </Select>
               </div>
+              {!data.license?.can_choose_mel_approval && (
+                <p className="text-xs text-amber-700 dark:text-amber-400">
+                  Community: Mel tool approval is fixed to <strong>always</strong>. Activate Pro
+                  to choose run_sql-only or auto.
+                </p>
+              )}
               <p className="text-xs text-muted-foreground pt-2 border-t">
                 Mel&apos;s live DB tools stay <strong>read-only</strong>. By default,{" "}
                 <code className="font-mono">run_sql</code> pauses for Approve/Deny in chat;

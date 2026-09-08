@@ -624,6 +624,37 @@ class ScriptRunResult(BaseModel):
     connections: list[ConnectionRunResultRead]
 
 
+# --- License ---
+
+class LicenseStatus(BaseModel):
+    """Non-secret license / entitlement snapshot for Settings."""
+
+    tier: Literal["community", "pro", "team"]
+    active: bool
+    source: Literal["none", "key", "dev_bypass"]
+    issued_at: datetime | None = None
+    expires_at: datetime | None = None
+    email: str | None = None
+    seat_id: str | None = None
+    instance_id: str | None = None
+    message: str | None = None
+    # Community Mel limit description (always present for UI copy)
+    community_mel_limit: str
+    can_use_mysql_mssql: bool
+    can_choose_mel_approval: bool
+    license_key_set: bool = False
+
+
+class LicenseActivateRequest(BaseModel):
+    """Paste a signed license key (dmtl1.…). Write-only — never returned."""
+
+    license_key: str
+
+
+class LicenseActivateResponse(BaseModel):
+    license: LicenseStatus
+
+
 # --- Settings ---
 
 class SettingsResponse(BaseModel):
@@ -642,6 +673,8 @@ class SettingsResponse(BaseModel):
     auth_token_ttl_hours: int = 0
     # Mel: run_sql_only (default) | always | auto
     mel_tool_approval: str = "run_sql_only"
+    # Licensing (Phase 1 offline Ed25519 keys)
+    license: LicenseStatus | None = None
 
 
 class AnthropicKeyUpdate(BaseModel):

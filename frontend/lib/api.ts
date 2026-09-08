@@ -14,6 +14,7 @@ import type {
   LoginResponse,
   Metrics,
   AppSettings,
+  LicenseStatus,
   MelToolApprovalMode,
   MelToolInvocation,
   MelStreamEvent,
@@ -314,6 +315,14 @@ export const api = {
       method: "PUT",
       body: JSON.stringify({ mel_tool_approval: mode }),
     }),
+  getLicense: () => request<LicenseStatus>("/api/settings/license"),
+  activateLicense: (licenseKey: string) =>
+    request<{ license: LicenseStatus }>("/api/settings/license", {
+      method: "POST",
+      body: JSON.stringify({ license_key: licenseKey }),
+    }),
+  deactivateLicense: () =>
+    request<LicenseStatus>("/api/settings/license", { method: "DELETE" }),
   listMelAudit: (limit = 100) =>
     request<MelToolInvocation[]>(`/api/chat/mel-audit?limit=${limit}`),
   decideMelTool: (proposalId: string, decision: "approve" | "deny") =>

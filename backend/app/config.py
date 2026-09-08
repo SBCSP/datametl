@@ -31,6 +31,12 @@ class Settings(BaseSettings):
     # OpenAPI /docs. Disable in production deploy (see DOCS_ENABLED in .env.deploy.example).
     docs_enabled: bool = Field(True, alias="DOCS_ENABLED")
 
+    # --- Licensing (offline Ed25519 keys; no Stripe secrets in the app) ---
+    # DATAMETL_LICENSE_DEV_BYPASS=true → treat as Pro for local docker (never in prod).
+    license_dev_bypass: bool = Field(False, alias="DATAMETL_LICENSE_DEV_BYPASS")
+    # Optional override of the embedded verify key (base64url 32-byte Ed25519 public key).
+    license_public_key: str = Field("", alias="LICENSE_PUBLIC_KEY")
+
     @field_validator("encryption_key")
     @classmethod
     def _reject_placeholder_encryption_key(cls, v: str) -> str:

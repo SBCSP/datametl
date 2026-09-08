@@ -51,6 +51,8 @@ services:
       AUTH_TOKEN_TTL_HOURS: ${AUTH_TOKEN_TTL_HOURS:-168}
       METRICS_ENABLED: ${METRICS_ENABLED:-true}
       METRICS_TOKEN: ${METRICS_TOKEN:-}
+      DATAMETL_LICENSE_DEV_BYPASS: ${DATAMETL_LICENSE_DEV_BYPASS:-false}
+      LICENSE_PUBLIC_KEY: ${LICENSE_PUBLIC_KEY:-}
     ports:
       - "8001:8000"
     volumes:
@@ -70,6 +72,8 @@ services:
       REDIS_URL: ${REDIS_URL}
       ENCRYPTION_KEY: ${ENCRYPTION_KEY}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      DATAMETL_LICENSE_DEV_BYPASS: ${DATAMETL_LICENSE_DEV_BYPASS:-false}
+      LICENSE_PUBLIC_KEY: ${LICENSE_PUBLIC_KEY:-}
     # `--watch /app/app` reloads the worker when Python files change. Requires watchfiles
     # (declared in backend/pyproject.toml).
     command: ["arq", "--watch", "/app/app", "app.jobs.worker.WorkerSettings"]
