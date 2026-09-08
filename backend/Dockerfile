@@ -19,12 +19,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # --- deps layer (cached unless pyproject/lock changes) ---
 # Require uv.lock — fail closed (no unfrozen fallback).
 COPY pyproject.toml uv.lock ./
-RUN --mount=type=cache,target=/root/.cache/uv \
+RUN --mount=type=cache,id=datametl-uv,target=/root/.cache/uv \
     uv sync --frozen --no-install-project
 
 # --- app layer ---
 COPY . .
-RUN --mount=type=cache,target=/root/.cache/uv \
+RUN --mount=type=cache,id=datametl-uv,target=/root/.cache/uv \
     uv sync --frozen
 
 ENV PATH="/opt/venv/bin:$PATH"
