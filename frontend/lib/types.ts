@@ -481,6 +481,7 @@ export interface LicenseStatus {
   community_mel_limit: string;
   can_use_mysql_mssql: boolean;
   can_choose_mel_approval: boolean;
+  allows_external_mcp: boolean;
   license_key_set: boolean;
 }
 
@@ -560,8 +561,20 @@ export interface ChatSessionDetail {
   title: string;
   model: string;
   messages: ChatMessage[];
+  /** Mel Approve/Deny cards persisted with the transcript for reload. */
+  tool_cards?: MelToolCardApi[];
   created_at: string;
   updated_at: string;
+}
+
+/** Wire shape for Mel tool cards on chat sessions (snake_case API). */
+export interface MelToolCardApi {
+  proposal_id: string;
+  name: string;
+  args_summary: string;
+  args: Record<string, unknown>;
+  status: MelToolCard["status"];
+  outcome_summary?: string | null;
 }
 // --- Tap (API data source) ---
 

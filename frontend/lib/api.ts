@@ -23,6 +23,7 @@ import type {
   ChatModels,
   ChatSessionDetail,
   ChatSessionSummary,
+  MelToolCardApi,
   MigrationOptionsPayload,
   MigrationPreflightResponse,
   MigrationRun,
@@ -338,11 +339,21 @@ export const api = {
   getChatModels: () => request<ChatModels>("/api/chat/models"),
   listChatSessions: () => request<ChatSessionSummary[]>("/api/chat/sessions"),
   getChatSession: (id: string) => request<ChatSessionDetail>(`/api/chat/sessions/${id}`),
-  createChatSession: (body: { title?: string | null; model: string; messages: ChatMessage[] }) =>
+  createChatSession: (body: {
+    title?: string | null;
+    model: string;
+    messages: ChatMessage[];
+    tool_cards?: MelToolCardApi[];
+  }) =>
     request<ChatSessionDetail>("/api/chat/sessions", { method: "POST", body: JSON.stringify(body) }),
   updateChatSession: (
     id: string,
-    body: { title?: string | null; model?: string | null; messages: ChatMessage[] },
+    body: {
+      title?: string | null;
+      model?: string | null;
+      messages: ChatMessage[];
+      tool_cards?: MelToolCardApi[];
+    },
   ) =>
     request<ChatSessionDetail>(`/api/chat/sessions/${id}`, {
       method: "PUT",

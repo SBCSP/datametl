@@ -642,6 +642,7 @@ class LicenseStatus(BaseModel):
     community_mel_limit: str
     can_use_mysql_mssql: bool
     can_choose_mel_approval: bool
+    allows_external_mcp: bool = False
     license_key_set: bool = False
 
 
@@ -712,16 +713,30 @@ class DescribeSqlRequest(BaseModel):
     model: str | None = None  # defaults server-side
 
 
+class MelToolCardIn(BaseModel):
+    """Mel Approve/Deny card persisted with a chat session transcript."""
+
+    proposal_id: str
+    name: str
+    args_summary: str = ""
+    args: dict[str, Any] = Field(default_factory=dict)
+    status: Literal["pending", "auto", "approved", "denied", "success", "error", "running"]
+    outcome_summary: str | None = None
+
+
 class ChatSessionCreate(BaseModel):
     title: str | None = None  # derived from the first user message when blank
     model: str
     messages: list[ChatMessageIn] = Field(default_factory=list)
+    tool_cards: list[MelToolCardIn] = Field(default_factory=list)
 
 
 class ChatSessionUpdate(BaseModel):
     title: str | None = None
     model: str | None = None
     messages: list[ChatMessageIn]
+    # None = leave existing sidecar unchanged (older clients); [] clears.
+    tool_cards: list[MelToolCardIn] | None = None
 
 
 class ChatSessionSummary(BaseModel):
@@ -738,6 +753,7 @@ class ChatSessionRead(BaseModel):
     title: str
     model: str
     messages: list[ChatMessageIn]
+    tool_cards: list[MelToolCardIn] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime
 

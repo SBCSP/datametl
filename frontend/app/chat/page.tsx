@@ -7,7 +7,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Bot, Check, Loader2, PanelLeft, Plus, Send, Trash2, X } from "lucide-react";
 import { api, ApiError, streamChat } from "@/lib/api";
-import type { ChatMessage, MelToolCard } from "@/lib/types";
+import type { ChatMessage, MelToolCard, MelToolCardApi } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Markdown } from "@/components/markdown";
@@ -32,6 +32,28 @@ function whenLabel(iso: string): string {
     hour: "2-digit",
     minute: "2-digit",
   });
+}
+
+function toolCardToApi(card: MelToolCard): MelToolCardApi {
+  return {
+    proposal_id: card.proposalId,
+    name: card.name,
+    args_summary: card.argsSummary,
+    args: card.args ?? {},
+    status: card.status,
+    outcome_summary: card.outcomeSummary ?? null,
+  };
+}
+
+function toolCardFromApi(card: MelToolCardApi): MelToolCard {
+  return {
+    proposalId: card.proposal_id,
+    name: card.name,
+    argsSummary: card.args_summary ?? "",
+    args: card.args ?? {},
+    status: card.status,
+    outcomeSummary: card.outcome_summary ?? undefined,
+  };
 }
 
 const SUGGESTIONS = [
@@ -66,6 +88,7 @@ function ChatPageBody() {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [toolCards, setToolCards] = useState<MelToolCard[]>([]);
+  const toolCardsRef = useRef<MelToolCard[]>([]);
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -134,12 +157,13 @@ function ChatPageBody() {
     });
   }
 
-  async function persist(final: ChatMessage[]) {
+  async function persist(final: ChatMessage[], cards?: MelToolCard[]) {
+    const tool_cards = (cards ?? toolCardsRef.current).map(toolCardToApi);
     try {
       if (sessionId) {
-        await api.updateChatSession(sessionId, { model, messages: final });
+        await api.updateChatSession(sessionId, { model, messages: final, tool_cards });
       } else {
-        const created = await api.createChatSession({ model, messages: final });
+        const created = await api.createChatSession({ model, messages: final, tool_cards });
         setSessionId(created.id);
       }
       qc.invalidateQueries({ queryKey: ["chat-sessions"] });
@@ -154,6 +178,7 @@ function ChatPageBody() {
     abortRef.current?.abort();
     setMessages([]);
     setToolCards([]);
+    toolCardsRef.current = [];
     setInput("");
     setSessionId(null);
   }
@@ -163,11 +188,13 @@ function ChatPageBody() {
     abortRef.current?.abort();
     try {
       const s = await api.getChatSession(id);
+      const cards = (s.tool_cards ?? []).map(toolCardFromApi);
       setMessages(s.messages);
       setModel(s.model);
       setSessionId(s.id);
       setInput("");
-      setToolCards([]);
+      setToolCards(cards);
+      toolCardsRef.current = cards;
     } catch (e) {
       toast.error(`Couldn't open chat: ${String(e)}`);
     }
@@ -187,21 +214,31 @@ function ChatPageBody() {
   function upsertToolCard(card: MelToolCard) {
     setToolCards((prev) => {
       const i = prev.findIndex((c) => c.proposalId === card.proposalId);
-      if (i < 0) return [...prev, card];
-      const copy = [...prev];
-      copy[i] = { ...copy[i], ...card };
-      return copy;
+      let next: MelToolCard[];
+      if (i < 0) {
+        next = [...prev, card];
+      } else {
+        const prevCard = prev[i];
+        const mergedArgs =
+          card.args && Object.keys(card.args).length > 0 ? card.args : prevCard.args;
+        next = [...prev];
+        next[i] = { ...prevCard, ...card, args: mergedArgs };
+      }
+      toolCardsRef.current = next;
+      return next;
     });
   }
 
   async function decideTool(proposalId: string, decision: "approve" | "deny") {
-    setToolCards((prev) =>
-      prev.map((c) =>
+    setToolCards((prev) => {
+      const next = prev.map((c) =>
         c.proposalId === proposalId
-          ? { ...c, status: decision === "approve" ? "running" : "denied" }
+          ? { ...c, status: (decision === "approve" ? "running" : "denied") as MelToolCard["status"] }
           : c,
-      ),
-    );
+      );
+      toolCardsRef.current = next;
+      return next;
+    });
     try {
       await api.decideMelTool(proposalId, decision);
     } catch (e) {
@@ -487,6 +524,7 @@ function ChatPageBody() {
                         <ToolApprovalCard
                           key={c.proposalId}
                           card={c}
+                          interactive={streaming}
                           onApprove={() => void decideTool(c.proposalId, "approve")}
                           onDeny={() => void decideTool(c.proposalId, "deny")}
                         />
@@ -542,17 +580,22 @@ function ChatPageBody() {
 
 function ToolApprovalCard({
   card,
+  interactive = true,
   onApprove,
   onDeny,
 }: {
   card: MelToolCard;
+  /** When false (reloaded history), show status only — Redis waiters are gone. */
+  interactive?: boolean;
   onApprove: () => void;
   onDeny: () => void;
 }) {
-  const pending = card.status === "pending";
+  const pending = card.status === "pending" && interactive;
   const statusLabel =
     card.status === "pending"
-      ? "Needs approval"
+      ? interactive
+        ? "Needs approval"
+        : "Was pending"
       : card.status === "running"
         ? "Running…"
         : card.status === "denied"

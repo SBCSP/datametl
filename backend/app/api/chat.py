@@ -4,6 +4,7 @@ Mel streams NDJSON events (token / tool_pending / tool_result / error / done). W
 MCP connection is active, Mel may call read-only DB tools; depending on settings, run_sql
 (and optionally all tools) pause for Approve/Deny in the chat UI before executing.
 Approve/Deny waiters are Redis-backed so any API worker can resolve a pending proposal.
+Tool cards are also persisted on the chat session (`tool_cards` JSONB) so reloads keep status.
 """
 from __future__ import annotations
 
@@ -36,6 +37,7 @@ from app.api.schemas_io import (
 )
 from app.crypto import vault
 from app.db import get_db
+from app.license.entitlements import get_entitlements
 from app.mcp import audit as mel_audit
 from app.mcp import tools as mcp_tools
 from app.mcp.approval import (
@@ -49,7 +51,6 @@ from app.mcp.approval import (
 from app.mcp.state import get_active_connection
 from app.models.chat_session import ChatSession
 from app.models.mel_tool_invocation import MelToolInvocation
-from app.license.entitlements import get_entitlements
 from app.settings_store import get_anthropic_key, get_mel_tool_approval
 
 router = APIRouter(prefix="/api/chat", tags=["chat"])
@@ -531,10 +532,23 @@ def _derive_title(messages: list[ChatMessageIn]) -> str:
     return "New chat"
 
 
+def _tool_cards_from_row(row: ChatSession) -> list:
+    """Coerce stored JSONB tool_cards (may be missing on pre-migration rows) to schema list."""
+    raw = getattr(row, "tool_cards", None) or []
+    if not isinstance(raw, list):
+        return []
+    return raw
+
+
 def _to_read(row: ChatSession) -> ChatSessionRead:
     return ChatSessionRead(
-        id=row.id, title=row.title, model=row.model, messages=row.messages,
-        created_at=row.created_at, updated_at=row.updated_at,
+        id=row.id,
+        title=row.title,
+        model=row.model,
+        messages=row.messages,
+        tool_cards=_tool_cards_from_row(row),
+        created_at=row.created_at,
+        updated_at=row.updated_at,
     )
 
 
@@ -557,6 +571,7 @@ def create_session(payload: ChatSessionCreate, db: Session = Depends(get_db)) ->
         title=title,
         model=payload.model,
         messages=[m.model_dump() for m in payload.messages],
+        tool_cards=[c.model_dump() for c in payload.tool_cards],
     )
     db.add(row)
     db.commit()
@@ -580,6 +595,8 @@ def update_session(
     if row is None:
         raise HTTPException(404, "Chat session not found")
     row.messages = [m.model_dump() for m in payload.messages]
+    if payload.tool_cards is not None:
+        row.tool_cards = [c.model_dump() for c in payload.tool_cards]
     if payload.model:
         row.model = payload.model
     if payload.title and payload.title.strip():
