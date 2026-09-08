@@ -31,11 +31,26 @@ class Settings(BaseSettings):
     # OpenAPI /docs. Disable in production deploy (see DOCS_ENABLED in .env.deploy.example).
     docs_enabled: bool = Field(True, alias="DOCS_ENABLED")
 
-    # --- Licensing (offline Ed25519 keys; no Stripe secrets in the app) ---
+    # --- Licensing (offline Ed25519 keys; Stripe secrets only for vendor issuer mode) ---
     # DATAMETL_LICENSE_DEV_BYPASS=true → treat as Pro for local docker (never in prod).
     license_dev_bypass: bool = Field(False, alias="DATAMETL_LICENSE_DEV_BYPASS")
     # Optional override of the embedded verify key (base64url 32-byte Ed25519 public key).
     license_public_key: str = Field("", alias="LICENSE_PUBLIC_KEY")
+
+    # Vendor issuer only (Phase 2). Leave empty for normal Community/Pro self-hosted installs.
+    stripe_secret_key: str = Field("", alias="STRIPE_SECRET_KEY")
+    stripe_webhook_secret: str = Field("", alias="STRIPE_WEBHOOK_SECRET")
+    stripe_pro_price_id: str = Field(
+        "price_1UDWhFLRy9hgB11RWQ9Xp9FJ", alias="STRIPE_PRO_PRICE_ID"
+    )
+    stripe_issuance_store_path: str = Field("", alias="STRIPE_ISSUANCE_STORE_PATH")
+
+    # Optional SMTP for license delivery (issuer mode). When unset, keys are log-only.
+    smtp_host: str = Field("", alias="SMTP_HOST")
+    smtp_port: int = Field(587, alias="SMTP_PORT")
+    smtp_user: str = Field("", alias="SMTP_USER")
+    smtp_pass: str = Field("", alias="SMTP_PASS")
+    smtp_from: str = Field("", alias="SMTP_FROM")
 
     @field_validator("encryption_key")
     @classmethod

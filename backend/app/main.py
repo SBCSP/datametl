@@ -12,6 +12,7 @@ from app import auth as auth_lib
 from app.api import (
     activity,
     auth,
+    billing,
     chat,
     comparisons,
     connections,
@@ -49,7 +50,7 @@ app = FastAPI(
 )
 
 # Endpoints reachable without a bearer token (only consulted when AUTH_ENABLED).
-_AUTH_OPEN_EXACT = {"/health", "/api/auth/login", "/api/auth/status"} | ({"/openapi.json"} if settings.docs_enabled else set())
+_AUTH_OPEN_EXACT = {"/health", "/api/auth/login", "/api/auth/status", "/api/billing/stripe/webhook"} | ({"/openapi.json"} if settings.docs_enabled else set())
 
 
 class AuthMiddleware(BaseHTTPMiddleware):
@@ -99,6 +100,7 @@ app.include_router(activity.router)
 app.include_router(metrics.router)
 app.include_router(prometheus.router)
 app.include_router(settings_api.router)
+app.include_router(billing.router)
 app.include_router(jobs.router)
 
 

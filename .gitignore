@@ -45,3 +45,7 @@ images/
 # Local license issuer private key (never commit)
 .license_signing_key
 LICENSE_SIGNING_KEY
+
+# Stripe issuer local idempotency store (may contain license keys)
+.stripe_issuance.json
+**/stripe_issuance.json

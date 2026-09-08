@@ -128,7 +128,7 @@ End users then run the one-liner above and pull the freshly-published images.
 
 ## Licensing (Community vs Pro)
 
-DataMETL Phase 1 uses **offline-verifiable signed license keys** (Ed25519). The app never embeds Stripe secret keys; Checkout/webhooks are not in this build.
+DataMETL uses **offline-verifiable signed license keys** (Ed25519, `dmtl1.…`). Normal Community / self-hosted Pro installs **never** need Stripe secrets — you paste a key in Settings. Stripe Checkout + webhooks are a **vendor-side issuer** path (Phase 2) that you enable only on an issuer machine.
 
 | Tier | What you get |
 |---|---|
@@ -139,7 +139,7 @@ DataMETL Phase 1 uses **offline-verifiable signed license keys** (Ed25519). The 
 ### Activate in the UI
 
 1. Open **Settings → License**
-2. Paste a `dmtl1.…` key → **Activate**
+2. Paste a `dmtl1.…` key → **Activate** (or use **Buy Pro** when `NEXT_PUBLIC_DATAMETL_PRO_URL` is set)
 3. Status shows tier, expiry (or perpetual), and email if present
 4. **Deactivate** clears the stored key (encrypted in `app_settings` like the Anthropic key)
 
@@ -153,7 +153,7 @@ DATAMETL_LICENSE_DEV_BYPASS=true
 
 That unlocks Pro features for development only — never enable in production.
 
-### Issue a Pro key (maintainers)
+### Issue a Pro key offline (maintainers)
 
 ```bash
 # Generate a signing keypair (keep the private key offline; embed/public-override the public key)
@@ -168,6 +168,48 @@ make license-issue EMAIL=you@example.com EXPIRES=+1y
 ```
 
 Optional: override the embedded verify key with `LICENSE_PUBLIC_KEY` (base64url 32-byte Ed25519 public key).
+
+### Phase 2 — Stripe webhook issuer (vendor only)
+
+After a customer pays via the Stripe **Payment Link**, a webhook on your issuer backend mints a Pro `dmtl1` key, logs it, optionally emails it (SMTP), and returns it in the webhook JSON (handy for local tests).
+
+**Sandbox (already provisioned — do not recreate products/prices):**
+
+| Item | Id / URL |
+|---|---|
+| Product | `prod_VDyei4v8ek2CDi` (DataMETL Pro) |
+| Price | `price_1UDWhFLRy9hgB11RWQ9Xp9FJ` ($79/mo) |
+| Payment Link | https://buy.stripe.com/test_6oU8wQ9cL1Bv3Av9cw7ok00 |
+
+**Enable issuer mode** in `.env` (never commit real values):
+
+```bash
+STRIPE_SECRET_KEY=sk_test_…
+STRIPE_WEBHOOK_SECRET=whsec_…          # from `stripe listen` or Dashboard webhook
+STRIPE_PRO_PRICE_ID=price_1UDWhFLRy9hgB11RWQ9Xp9FJ
+LICENSE_SIGNING_KEY=…                  # same key as make license-issue
+# optional email delivery:
+# SMTP_HOST=… SMTP_PORT=587 SMTP_USER=… SMTP_PASS=… SMTP_FROM=…
+NEXT_PUBLIC_DATAMETL_PRO_URL=https://buy.stripe.com/test_6oU8wQ9cL1Bv3Av9cw7ok00
+```
+
+Without `STRIPE_SECRET_KEY` + `STRIPE_WEBHOOK_SECRET`, `POST /api/billing/stripe/webhook` returns **404** and the rest of the app works as Community/Pro-with-pasted-key.
+
+**Local end-to-end test:**
+
+```bash
+# Terminal A — app (backend on :8001)
+make up
+
+# Terminal B — forward Stripe events to the issuer webhook
+stripe listen --forward-to localhost:8001/api/billing/stripe/webhook
+# copy the whsec_… into STRIPE_WEBHOOK_SECRET and restart backend if needed
+
+# Browser — pay with test card 4242 4242 4242 4242 (any future expiry / CVC)
+open https://buy.stripe.com/test_6oU8wQ9cL1Bv3Av9cw7ok00
+```
+
+On `checkout.session.completed` (and matching `invoice.paid` / `customer.subscription.created` for the Pro price), the backend verifies `Stripe-Signature`, mints a key, logs `DATAMETL_LICENSE_KEY …`, and is **idempotent** on event/session replay. Paste the key in Settings → License.
 
 ## Architecture
 

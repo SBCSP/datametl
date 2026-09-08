@@ -22,6 +22,7 @@ dependencies = [
     "pymssql>=2.3",
     "croniter>=2.0",
     "httpx>=0.28",
+    "stripe>=15.6.1",
 ]
 
 [dependency-groups]
@@ -55,7 +56,7 @@ plugins = ["pydantic.mypy"]
 exclude = ["alembic/"]
 
 [[tool.mypy.overrides]]
-module = ["arq.*", "croniter.*"]
+module = ["arq.*", "croniter.*", "stripe.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

@@ -316,13 +316,25 @@ export default function SettingsPage() {
                     Deactivate
                   </Button>
                 )}
+                {process.env.NEXT_PUBLIC_DATAMETL_PRO_URL ? (
+                  <Button size="sm" variant="outline" asChild>
+                    <a
+                      href={process.env.NEXT_PUBLIC_DATAMETL_PRO_URL}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      Buy Pro <ExternalLink className="h-3 w-3 ml-1" />
+                    </a>
+                  </Button>
+                ) : null}
               </div>
               <p className="text-xs text-muted-foreground pt-2 border-t">
                 <strong>Community</strong> (no key): Postgres migrate/introspect/compare/verify;
                 Mel allowed with tool approval forced to <code className="font-mono">always</code>.{" "}
                 <strong>Pro</strong>: full Mel approval modes + MySQL/SQL Server connectors.
                 Keys are offline-verifiable (Ed25519) and stored encrypted like the Anthropic key.
-                Stripe Checkout is not in this build — paste a signed key from your issuer.
+                Purchase via <strong>Buy Pro</strong> (Stripe Payment Link) when configured, or paste
+                a signed key from your issuer.
               </p>
             </CardContent>
           </Card>

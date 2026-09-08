@@ -1,4 +1,4 @@
-"""Offline-verifiable DataMETL license keys (Ed25519). No Stripe secrets in the app.
+"""Offline-verifiable DataMETL license keys (Ed25519). Stripe secrets are optional vendor-issuer only.
 
 Phase 1 product model:
 - Community (no key): migrate/introspect/compare/verify + Mel with tool approval forced to ``always``.

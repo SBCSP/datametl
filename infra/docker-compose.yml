@@ -53,6 +53,17 @@ services:
       METRICS_TOKEN: ${METRICS_TOKEN:-}
       DATAMETL_LICENSE_DEV_BYPASS: ${DATAMETL_LICENSE_DEV_BYPASS:-false}
       LICENSE_PUBLIC_KEY: ${LICENSE_PUBLIC_KEY:-}
+      # Vendor issuer only (Phase 2). Empty = webhook disabled; Community installs need none of these.
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+      STRIPE_PRO_PRICE_ID: ${STRIPE_PRO_PRICE_ID:-price_1UDWhFLRy9hgB11RWQ9Xp9FJ}
+      STRIPE_ISSUANCE_STORE_PATH: ${STRIPE_ISSUANCE_STORE_PATH:-}
+      LICENSE_SIGNING_KEY: ${LICENSE_SIGNING_KEY:-}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      SMTP_FROM: ${SMTP_FROM:-}
     ports:
       - "8001:8000"
     volumes:
@@ -91,6 +102,7 @@ services:
       - backend
     environment:
       NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://localhost:8001}
+      NEXT_PUBLIC_DATAMETL_PRO_URL: ${NEXT_PUBLIC_DATAMETL_PRO_URL:-}
     ports:
       - "3005:3000"
     volumes:
