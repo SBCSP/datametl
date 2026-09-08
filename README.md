@@ -1,15 +1,24 @@
 # DataMETL
 
-A local-first database migration tool for **PostgreSQL** (including managed Postgres such as AWS RDS). Connect a source and destination, compare their schemas, map datatypes, move the data, and verify parity. The connector and introspection layers are **pluggable** — Postgres is supported today, and additional engines (MySQL is next) slot in without touching the rest of the app.
+**Local-first database migration + Mel**, your approve-to-run DB copilot.
 
-It runs on your laptop, never sends your database credentials anywhere, and lets you:
+Connect source and destination, compare schemas, map datatypes, stream the data, and verify parity — on your laptop or your own Docker network. **Credentials stay with you** (Fernet-encrypted at rest); they are never sent to SandboxCSP. Mel uses *your* Anthropic key; live tools are **read-only**, with Community Approve-always and Pro flexible modes. Postgres is first-class; **Pro** unlocks MySQL and SQL Server plus offline Ed25519 license keys.
 
-1. **Connect** to source + destination databases (Postgres today; more engines being added).
-2. **Introspect** each schema (tables, columns, datatypes, defaults, FKs, indexes, RLS policies, extensions).
-3. **Compare** source vs. destination side-by-side at the schema level — with per-schema scoping.
-4. **Map** datatypes from source to destination, with sensible defaults and per-column overrides.
-5. **Migrate** the data via streaming binary `COPY` with per-table conflict modes.
-6. **Verify** parity with row counts + hash sampling + sequence checks (also runs as a standalone tool).
+| | |
+|---|---|
+| **Install** | One-liner below → open http://localhost:3000 |
+| **Trust** | In-app [`/trust`](http://localhost:3000/trust) · [docs/TRUST.md](./docs/TRUST.md) |
+| **Buy Pro** | $79/mo — paste a `dmtl1.…` key in Settings (Stripe Payment Link is vendor/test; see Licensing) |
+
+Workflow:
+
+1. **Connect** source + destination (Postgres; Pro: MySQL / SQL Server).
+2. **Introspect** schemas (tables, columns, datatypes, defaults, FKs, indexes, RLS, extensions).
+3. **Compare** source vs. destination side-by-side — with per-schema scoping.
+4. **Map** datatypes, with sensible defaults and per-column overrides.
+5. **Migrate** via streaming binary `COPY` with per-table conflict modes.
+6. **Verify** parity with row counts + hash sampling + sequence checks.
+7. **Ask Mel** — ambient deep-links from Connections / Schemas / Migrations; MCP tools stay read-only and audited.
 
 ![DataMETL](./images/DataMETL.jpg)
 
@@ -214,3 +223,5 @@ On `checkout.session.completed` (and matching `invoice.paid` / `customer.subscri
 ## Architecture
 
 See [CLAUDE.md](CLAUDE.md) for the architectural overview that future Claude Code sessions use.
+
+Launch / trust assets: [docs/TRUST.md](./docs/TRUST.md), [docs/LAUNCH.md](./docs/LAUNCH.md), [CHANGELOG.md](./CHANGELOG.md).

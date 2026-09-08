@@ -136,7 +136,8 @@ export default function SettingsPage() {
                 <code className="font-mono">ENCRYPTION_KEY</code>. To rotate, generate a new key with{" "}
                 <code className="font-mono">make key</code>, replace it in <code className="font-mono">.env</code>, and
                 restart the stack — but be aware: existing connections were encrypted with the old key and will need to
-                be re-entered.
+                be re-entered.{" "}
+                <a href="/trust" className="underline">Trust & security</a>
               </p>
             </CardContent>
           </Card>
@@ -377,9 +378,14 @@ export default function SettingsPage() {
                 machine (encrypted at rest) — Mel never ships them to third parties beyond the
                 model API calls you configure.
               </p>
-              <Button variant="outline" size="sm" asChild>
-                <a href="/runs">View Mel tool audit on Runs</a>
-              </Button>
+              <div className="flex flex-wrap gap-2">
+                <Button variant="outline" size="sm" asChild>
+                  <a href="/runs">View Mel tool audit on Runs</a>
+                </Button>
+                <Button variant="outline" size="sm" asChild>
+                  <a href="/trust">Trust & security</a>
+                </Button>
+              </div>
             </CardContent>
           </Card>
 

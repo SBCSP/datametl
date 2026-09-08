@@ -17,6 +17,7 @@ import {
   Network,
   Radio,
   Settings,
+  Shield,
   ShieldCheck,
   Workflow,
 } from "lucide-react";
@@ -67,7 +68,10 @@ const NAV: { section: string; items: NavItem[] }[] = [
   },
   {
     section: "System",
-    items: [{ href: "/settings", label: "Settings", icon: Settings, matchPrefix: "/settings" }],
+    items: [
+      { href: "/trust", label: "Trust", icon: Shield, matchPrefix: "/trust" },
+      { href: "/settings", label: "Settings", icon: Settings, matchPrefix: "/settings" },
+    ],
   },
 ];
 
