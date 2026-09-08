@@ -1,8 +1,8 @@
 """Streaming chat with Claude via the Anthropic API.
 
-Phase 1: plain chat (no DB/tool use). This is a direct streaming endpoint, NOT an arq job —
-it touches no user database, so the request handler streams tokens straight back to the
-browser. The Anthropic key is read from the encrypted app-settings store.
+Mel streams NDJSON events (token / tool_pending / tool_result / error / done). When a live
+MCP connection is active, Mel may call read-only DB tools; depending on settings, run_sql
+(and optionally all tools) pause for Approve/Deny in the chat UI before executing.
 """
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ from typing import Any
 import anthropic
 from anthropic import AsyncAnthropic
 from anthropic.types import MessageParam, TextBlockParam, ToolParam, ToolResultBlockParam
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -29,13 +29,26 @@ from app.api.schemas_io import (
     ChatSessionSummary,
     ChatSessionUpdate,
     DescribeSqlRequest,
+    MelToolDecisionRequest,
+    MelToolDecisionResponse,
+    MelToolInvocationRead,
 )
 from app.crypto import vault
 from app.db import get_db
+from app.mcp import audit as mel_audit
 from app.mcp import tools as mcp_tools
+from app.mcp.approval import (
+    args_summary,
+    needs_approval,
+    outcome_summary,
+    register_proposal,
+    resolve_decision,
+    wait_decision,
+)
 from app.mcp.state import get_active_connection
 from app.models.chat_session import ChatSession
-from app.settings_store import get_anthropic_key
+from app.models.mel_tool_invocation import MelToolInvocation
+from app.settings_store import get_anthropic_key, get_mel_tool_approval
 
 router = APIRouter(prefix="/api/chat", tags=["chat"])
 
@@ -125,9 +138,22 @@ anything yourself.
 DDL preview for the operator to run themselves. Keep your advice consistent with that safety \
 model.
 
+## Tool approvals (honesty)
+- Some tools — especially `run_sql` — may require the operator to click **Approve** or **Deny** \
+in the chat UI before they execute. You will get a normal tool_result either way.
+- If a tool was **denied**, say so plainly: it did **not** run, you saw no rows, and you must \
+not invent results. Offer to adjust the query or wait for approval on a retry.
+- If a tool **errored**, report the error; don't pretend it succeeded.
+- Never claim you inspected or queried the live database unless a tool_result actually returned \
+data.
+
 Databases are your home and where you go deep and exacting. You're not a walled garden, though \
 — if the operator asks something outside databases, help them properly and in your own voice, \
 just don't wander off into long detours. Be useful, then get back to the data."""
+
+
+def _event(obj: dict[str, Any]) -> str:
+    return json.dumps(obj, default=str) + "\n"
 
 
 @router.get("/models", response_model=ChatModelsResponse)
@@ -156,7 +182,8 @@ DB_TOOLS: list[ToolParam] = [
         "name": "run_sql",
         "description": (
             "Run a read-only SQL query against the connected database and return the rows. "
-            "Writes and DDL are rejected. Results are capped to 200 rows."
+            "Writes and DDL are rejected. Results are capped to 200 rows. May require the "
+            "operator to Approve in the chat UI before it runs."
         ),
         "input_schema": {
             "type": "object",
@@ -193,7 +220,7 @@ def _execute_tool(name: str, tool_input: dict[str, Any], engine: str, creds: dic
 
 
 async def _plain_stream(api_key: str, model: str, messages: list[MessageParam]) -> AsyncIterator[str]:
-    """Mel's original plain chat — used whenever no MCP connection is active."""
+    """Mel's plain chat (no MCP) — NDJSON token events."""
     client = AsyncAnthropic(api_key=api_key)
     system = _system_blocks()
     use_thinking = model in THINKING_EFFORT_MODELS
@@ -207,24 +234,37 @@ async def _plain_stream(api_key: str, model: str, messages: list[MessageParam]) 
             ctx = client.messages.stream(model=model, max_tokens=8192, system=system, messages=messages)
         async with ctx as stream:
             async for text in stream.text_stream:
-                yield text
+                if text:
+                    yield _event({"type": "token", "text": text})
+        yield _event({"type": "done"})
     except anthropic.APIStatusError as e:
-        yield f"\n\n[error: {e.message}]"
+        yield _event({"type": "error", "message": e.message})
+        yield _event({"type": "done"})
     except Exception as e:  # never leak a traceback into the chat
-        yield f"\n\n[error: {e}]"
+        yield _event({"type": "error", "message": str(e)})
+        yield _event({"type": "done"})
 
 
 async def _tool_loop_stream(
-    api_key: str, model: str, messages: list[MessageParam],
-    conn_name: str, engine: str, creds: dict[str, Any],
+    api_key: str,
+    model: str,
+    messages: list[MessageParam],
+    *,
+    conn_id: uuid.UUID,
+    conn_name: str,
+    engine: str,
+    creds: dict[str, Any],
+    approval_mode: str,
+    session_id: uuid.UUID | None,
 ) -> AsyncIterator[str]:
-    """Streaming tool-use loop: Mel can call the read-only DB tools against the active connection."""
+    """Streaming tool-use loop with optional Approve/Deny for Mel DB tools."""
     client = AsyncAnthropic(api_key=api_key)
     note = (
         f"You are connected, READ-ONLY, to the database '{conn_name}' (engine: {engine}). Use the "
         "list_tables, describe_table, and run_sql tools to inspect and query it for the operator. "
         "Only read queries are possible — writes and DDL are rejected. Prefer running a query to "
-        "verify rather than guessing."
+        "verify rather than guessing. Some tools (especially run_sql) may wait for the operator to "
+        "Approve or Deny in the UI; if denied, say so and do not invent results."
     )
     system = _system_blocks(note)
     msgs: list[MessageParam] = list(messages)
@@ -234,26 +274,134 @@ async def _tool_loop_stream(
                 model=model, max_tokens=8192, system=system, messages=msgs, tools=DB_TOOLS,
             ) as stream:
                 async for text in stream.text_stream:
-                    yield text
+                    if text:
+                        yield _event({"type": "token", "text": text})
                 final = await stream.get_final_message()
             if final.stop_reason != "tool_use":
+                yield _event({"type": "done"})
                 return
             msgs.append({"role": "assistant", "content": final.content})
             tool_results: list[ToolResultBlockParam] = []
             for block in final.content:
-                if block.type == "tool_use":
-                    result = await asyncio.to_thread(
-                        _execute_tool, block.name, dict(block.input), engine, creds
+                if block.type != "tool_use":
+                    continue
+                tool_input = dict(block.input) if block.input else {}
+                proposal_id = uuid.uuid4()
+                summary = args_summary(block.name, tool_input)
+                require = needs_approval(block.name, approval_mode)
+
+                if require:
+                    mel_audit.create_invocation(
+                        proposal_id=proposal_id,
+                        tool_name=block.name,
+                        tool_input=tool_input,
+                        decision="pending",
+                        model=model,
+                        session_id=session_id,
+                        connection_id=conn_id,
+                        connection_name=conn_name,
                     )
-                    tool_results.append(
-                        {"type": "tool_result", "tool_use_id": block.id, "content": result}
+                    await register_proposal(proposal_id)
+                    yield _event({
+                        "type": "tool_pending",
+                        "proposal_id": str(proposal_id),
+                        "name": block.name,
+                        "args": tool_input,
+                        "args_summary": summary,
+                        "status": "pending",
+                    })
+                    decision = await wait_decision(proposal_id)
+                    if decision != "approve":
+                        denied_payload = json.dumps({
+                            "error": "Tool denied by operator — not executed.",
+                            "denied": True,
+                        })
+                        mel_audit.finish_invocation(
+                            proposal_id,
+                            decision="denied",
+                            outcome="denied",
+                            outcome_detail=outcome_summary(denied_payload, denied=True),
+                        )
+                        yield _event({
+                            "type": "tool_result",
+                            "proposal_id": str(proposal_id),
+                            "name": block.name,
+                            "args_summary": summary,
+                            "status": "denied",
+                            "outcome_summary": outcome_summary(denied_payload, denied=True),
+                        })
+                        tool_results.append({
+                            "type": "tool_result",
+                            "tool_use_id": block.id,
+                            "content": denied_payload,
+                            "is_error": True,
+                        })
+                        continue
+                    # Approved — fall through to execute
+                    decision_label = "approved"
+                else:
+                    decision_label = "auto"
+                    mel_audit.create_invocation(
+                        proposal_id=proposal_id,
+                        tool_name=block.name,
+                        tool_input=tool_input,
+                        decision="auto",
+                        model=model,
+                        session_id=session_id,
+                        connection_id=conn_id,
+                        connection_name=conn_name,
                     )
+                    yield _event({
+                        "type": "tool_pending",
+                        "proposal_id": str(proposal_id),
+                        "name": block.name,
+                        "args": tool_input,
+                        "args_summary": summary,
+                        "status": "auto",
+                    })
+
+                result = await asyncio.to_thread(
+                    _execute_tool, block.name, tool_input, engine, creds
+                )
+                err = None
+                try:
+                    parsed = json.loads(result)
+                    if isinstance(parsed, dict) and parsed.get("error"):
+                        err = str(parsed["error"])
+                except Exception:
+                    pass
+                out_status = "error" if err else "success"
+                detail = outcome_summary(result, error=err)
+                mel_audit.finish_invocation(
+                    proposal_id,
+                    decision=decision_label,
+                    outcome=out_status,
+                    outcome_detail=detail,
+                )
+                yield _event({
+                    "type": "tool_result",
+                    "proposal_id": str(proposal_id),
+                    "name": block.name,
+                    "args_summary": summary,
+                    "status": "approved" if decision_label == "approved" else decision_label,
+                    "outcome": out_status,
+                    "outcome_summary": detail,
+                })
+                tool_results.append({
+                    "type": "tool_result",
+                    "tool_use_id": block.id,
+                    "content": result,
+                    "is_error": bool(err),
+                })
             msgs.append({"role": "user", "content": tool_results})
-        yield "\n\n[stopped: too many tool calls in one turn]"
+        yield _event({"type": "token", "text": "\n\n[stopped: too many tool calls in one turn]"})
+        yield _event({"type": "done"})
     except anthropic.APIStatusError as e:
-        yield f"\n\n[error: {e.message}]"
+        yield _event({"type": "error", "message": e.message})
+        yield _event({"type": "done"})
     except Exception as e:  # never leak a traceback into the chat
-        yield f"\n\n[error: {e}]"
+        yield _event({"type": "error", "message": str(e)})
+        yield _event({"type": "done"})
 
 
 @router.post("/stream")
@@ -267,14 +415,51 @@ async def chat_stream(payload: ChatRequest, db: Session = Depends(get_db)) -> St
     # Resolve everything that needs `db` now — the generator runs after this handler returns.
     messages: list[MessageParam] = [{"role": m.role, "content": m.content} for m in payload.messages]
     model = payload.model
+    session_id = payload.session_id
     active = get_active_connection(db)
+    approval_mode = get_mel_tool_approval(db)
 
     if active is not None:
         creds = vault.decrypt(active.encrypted_credentials)
-        gen = _tool_loop_stream(api_key, model, messages, active.name, active.engine, creds)
+        gen = _tool_loop_stream(
+            api_key,
+            model,
+            messages,
+            conn_id=active.id,
+            conn_name=active.name,
+            engine=active.engine,
+            creds=creds,
+            approval_mode=approval_mode,
+            session_id=session_id,
+        )
     else:
         gen = _plain_stream(api_key, model, messages)
-    return StreamingResponse(gen, media_type="text/plain; charset=utf-8")
+    return StreamingResponse(gen, media_type="application/x-ndjson; charset=utf-8")
+
+
+@router.post("/tool-decision", response_model=MelToolDecisionResponse)
+async def tool_decision(payload: MelToolDecisionRequest) -> MelToolDecisionResponse:
+    """Approve or deny a pending Mel tool proposal from the chat UI."""
+    ok = resolve_decision(payload.proposal_id, payload.decision)
+    if not ok:
+        raise HTTPException(404, "No pending tool proposal with that id (already decided or expired).")
+    return MelToolDecisionResponse(
+        ok=True, proposal_id=payload.proposal_id, decision=payload.decision
+    )
+
+
+@router.get("/mel-audit", response_model=list[MelToolInvocationRead])
+def list_mel_audit(
+    db: Session = Depends(get_db),
+    limit: int = Query(100, ge=1, le=500),
+) -> list[MelToolInvocation]:
+    """Recent Mel tool invocations (redacted args) for the audit / activity surfaces."""
+    rows = list(
+        db.execute(
+            select(MelToolInvocation).order_by(MelToolInvocation.created_at.desc()).limit(limit)
+        ).scalars()
+    )
+    return rows
 
 
 # --- Describe a SQL script (used by the Scripts editor's "Generate with Mel" button) ---

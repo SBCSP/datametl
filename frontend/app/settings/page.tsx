@@ -3,7 +3,9 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { CheckCircle2, ExternalLink, KeyRound, Lock, Server, Sparkles, XCircle } from "lucide-react";
+import { Bot, CheckCircle2, ExternalLink, KeyRound, Lock, Server, Sparkles, XCircle } from "lucide-react";
+import type { MelToolApprovalMode } from "@/lib/types";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { api, apiBaseUrl } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -27,6 +29,15 @@ export default function SettingsPage() {
       setAnthropicKey("");
       qc.invalidateQueries({ queryKey: ["settings"] });
       toast.success(r.anthropic_api_key_set ? "Anthropic key saved" : "Anthropic key cleared");
+    },
+    onError: (e) => toast.error(String(e)),
+  });
+
+  const saveMelApproval = useMutation({
+    mutationFn: (mode: MelToolApprovalMode) => api.updateMelToolApproval(mode),
+    onSuccess: (r) => {
+      qc.invalidateQueries({ queryKey: ["settings"] });
+      toast.success(`Mel tool approval: ${r.mel_tool_approval.replace(/_/g, " ")}`);
     },
     onError: (e) => toast.error(String(e)),
   });
@@ -212,6 +223,45 @@ export default function SettingsPage() {
                 <a href="/chat" className="underline">Mel</a>, the chat assistant. Write-only — the
                 value is never shown again.
               </p>
+            </CardContent>
+          </Card>
+
+
+          {/* Mel / trust */}
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base flex items-center gap-2">
+                <Bot className="h-4 w-4" /> Mel
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3 text-sm">
+              <div className="space-y-1.5">
+                <Label>Tool approval</Label>
+                <Select
+                  value={data.mel_tool_approval ?? "run_sql_only"}
+                  onValueChange={(v) => saveMelApproval.mutate(v as MelToolApprovalMode)}
+                  disabled={saveMelApproval.isPending}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="run_sql_only">Approve run_sql (default)</SelectItem>
+                    <SelectItem value="always">Approve every Mel tool</SelectItem>
+                    <SelectItem value="auto">Auto-run (no prompts)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <p className="text-xs text-muted-foreground pt-2 border-t">
+                Mel&apos;s live DB tools stay <strong>read-only</strong>. By default,{" "}
+                <code className="font-mono">run_sql</code> pauses for Approve/Deny in chat;
+                list/describe can auto-run. Credentials and the Anthropic key stay on this
+                machine (encrypted at rest) — Mel never ships them to third parties beyond the
+                model API calls you configure.
+              </p>
+              <Button variant="outline" size="sm" asChild>
+                <a href="/runs">View Mel tool audit on Runs</a>
+              </Button>
             </CardContent>
           </Card>
 

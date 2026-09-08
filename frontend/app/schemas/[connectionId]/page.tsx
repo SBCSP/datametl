@@ -4,9 +4,12 @@ import { Suspense, use, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { AlertTriangle, Boxes, History, Info, Loader2, RefreshCw, Database } from "lucide-react";
+import { AlertTriangle, Bot, Boxes, History, Info, Loader2, RefreshCw, Database } from "lucide-react";
+import Link from "next/link";
+import { askMelAboutConnection, askMelAboutSchema, askMelAboutTable } from "@/lib/mel-context";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { engineLabel } from "@/lib/engines";
 import { useJob } from "@/lib/use-job";
 import type { JobProgress, NormalizedSchema, SchemaWarning, SnapshotSummary } from "@/lib/types";
 import { ApplySchemaDialog } from "@/components/apply-schema-dialog";
@@ -89,11 +92,18 @@ function SchemaPageBody({ params }: { params: Promise<{ connectionId: string }> 
       <PageHeader
         title={conn.data?.name ?? "…"}
         description={
-          snaps.data?.length
-            ? `Latest snapshot: ${new Date(snaps.data[0].captured_at).toLocaleString()}`
-            : isRunning
-              ? "Capturing schema…"
-              : "No snapshot yet."
+          <span className="inline-flex flex-wrap items-center gap-2">
+            {conn.data && (
+              <Badge variant="secondary">{engineLabel(conn.data.engine)}</Badge>
+            )}
+            <span>
+              {snaps.data?.length
+                ? `Latest snapshot: ${new Date(snaps.data[0].captured_at).toLocaleString()}`
+                : isRunning
+                  ? "Capturing schema…"
+                  : "No snapshot yet."}
+            </span>
+          </span>
         }
         breadcrumbs={[
           { label: "Connections", href: "/connections" },
@@ -101,6 +111,13 @@ function SchemaPageBody({ params }: { params: Promise<{ connectionId: string }> 
         ]}
         actions={
           <div className="flex gap-2">
+            {conn.data && (
+              <Button variant="outline" asChild>
+                <Link href={askMelAboutConnection(conn.data.name, connectionId)}>
+                  <Bot className="h-4 w-4" /> Ask Mel
+                </Link>
+              </Button>
+            )}
             {selectedId && (
               <Button variant="outline" onClick={() => setApplyOpen(true)}>
                 <Boxes className="h-4 w-4" /> Apply schema
@@ -144,7 +161,11 @@ function SchemaPageBody({ params }: { params: Promise<{ connectionId: string }> 
               {snapshot.isLoading ? (
                 <p className="text-sm text-muted-foreground">Loading snapshot…</p>
               ) : snapshot.data ? (
-                <SchemaTree schema={snapshot.data.normalized_schema} />
+                <SchemaTree
+                  schema={snapshot.data.normalized_schema}
+                  connectionId={connectionId}
+                  connectionName={conn.data?.name ?? "connection"}
+                />
               ) : null}
             </div>
           </div>
@@ -335,7 +356,15 @@ function Warnings({ warnings }: { warnings: SchemaWarning[] }) {
   );
 }
 
-function SchemaTree({ schema }: { schema: NormalizedSchema }) {
+function SchemaTree({
+  schema,
+  connectionId,
+  connectionName,
+}: {
+  schema: NormalizedSchema;
+  connectionId: string;
+  connectionName: string;
+}) {
   const bySchema = schema.tables.reduce<Record<string, typeof schema.tables>>((acc, t) => {
     (acc[t.schema] ??= []).push(t);
     return acc;
@@ -370,14 +399,21 @@ function SchemaTree({ schema }: { schema: NormalizedSchema }) {
         .map(([s, tables]) => (
           <Card key={s}>
             <CardHeader className="pb-3">
-              <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-                {s} <span className="ml-1 text-muted-foreground/70">· {tables.length}</span>
+              <CardTitle className="flex items-center gap-2 text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+                <span>
+                  {s} <span className="ml-1 text-muted-foreground/70">· {tables.length}</span>
+                </span>
+                <Button size="sm" variant="ghost" className="ml-auto h-7 normal-case tracking-normal" asChild>
+                  <Link href={askMelAboutSchema(connectionName, connectionId, s)}>
+                    <Bot className="h-3.5 w-3.5" /> Ask Mel
+                  </Link>
+                </Button>
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-6">
               {tables.map((t) => (
                 <div key={t.name}>
-                  <div className="flex items-center gap-2 mb-2">
+                  <div className="mb-2 flex flex-wrap items-center gap-2">
                     <span className="font-medium">{t.name}</span>
                     {t.rls_enabled && <Badge variant="warning">RLS</Badge>}
                     {t.row_count_estimate !== null && (
@@ -385,6 +421,11 @@ function SchemaTree({ schema }: { schema: NormalizedSchema }) {
                         ~{t.row_count_estimate.toLocaleString()} rows
                       </span>
                     )}
+                    <Button size="sm" variant="ghost" className="ml-auto h-7" asChild>
+                      <Link href={askMelAboutTable(connectionName, connectionId, s, t.name)}>
+                        <Bot className="h-3.5 w-3.5" /> Ask Mel
+                      </Link>
+                    </Button>
                   </div>
                   <Table>
                     <TableHeader>

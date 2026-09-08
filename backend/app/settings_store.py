@@ -45,3 +45,36 @@ def clear_anthropic_key(db: Session) -> None:
     if row is not None:
         db.delete(row)
         db.commit()
+
+
+# --- Mel tool approval mode (non-secret preference, still Fernet-wrapped for one store) ---
+
+_MEL_TOOL_APPROVAL = "mel_tool_approval"
+
+
+def get_mel_tool_approval(db: Session) -> str:
+    from app.mcp.approval import APPROVAL_MODES, DEFAULT_APPROVAL_MODE
+
+    row = db.get(AppSetting, _MEL_TOOL_APPROVAL)
+    if row is None:
+        return DEFAULT_APPROVAL_MODE
+    value = vault.decrypt(row.encrypted_value).get(_MEL_TOOL_APPROVAL)
+    if value in APPROVAL_MODES:
+        return value
+    return DEFAULT_APPROVAL_MODE
+
+
+def set_mel_tool_approval(db: Session, mode: str) -> str:
+    from app.mcp.approval import APPROVAL_MODES, DEFAULT_APPROVAL_MODE
+
+    mode = (mode or "").strip() or DEFAULT_APPROVAL_MODE
+    if mode not in APPROVAL_MODES:
+        raise ValueError(f"Invalid mel_tool_approval mode: {mode}")
+    encrypted = vault.encrypt({_MEL_TOOL_APPROVAL: mode})
+    row = db.get(AppSetting, _MEL_TOOL_APPROVAL)
+    if row is None:
+        db.add(AppSetting(key=_MEL_TOOL_APPROVAL, encrypted_value=encrypted))
+    else:
+        row.encrypted_value = encrypted
+    db.commit()
+    return mode

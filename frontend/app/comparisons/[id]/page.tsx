@@ -4,7 +4,8 @@ import { Suspense, use, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
-import { AlertTriangle, ArrowRight, Database, FileText, Loader2, ShieldCheck, Truck } from "lucide-react";
+import { AlertTriangle, ArrowRight, Bot, Database, FileText, Loader2, ShieldCheck, Truck } from "lucide-react";
+import { askMelAboutComparison } from "@/lib/mel-context";
 import { api } from "@/lib/api";
 import { useJob } from "@/lib/use-job";
 import type { ColumnDrift, ComparisonReport, SchemaDiff, SchemaWarning, TableComparison } from "@/lib/types";
@@ -83,6 +84,11 @@ function ComparisonDetailBody({ params }: { params: Promise<{ id: string }> }) {
         breadcrumbs={[{ label: "Comparisons", href: "/comparisons" }, { label: id.slice(0, 8) + "…" }]}
         actions={
           <>
+            <Button asChild variant="outline">
+              <Link href={askMelAboutComparison(title)}>
+                <Bot className="h-4 w-4" /> Ask Mel
+              </Link>
+            </Button>
             <Button asChild variant="outline" disabled={!ready}>
               <Link href={`/comparisons/${id}/report`} target="_blank">
                 <FileText className="h-4 w-4" /> Report

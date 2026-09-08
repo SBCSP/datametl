@@ -54,10 +54,11 @@ Environment = Literal["development", "staging", "production"]
 
 class ConnectionCreate(BaseModel):
     name: str = Field(min_length=1, max_length=255)
-    engine: Literal["postgres", "mysql"]
+    engine: Literal["postgres", "mysql", "mssql"]
     environment: Environment | None = None
-    # Postgres + MySQL credentials are structurally identical (host/port/database/user/password
-    # + optional sslmode/sslrootcert), so one model serves both; the connector interprets SSL.
+    # Postgres / MySQL / SQL Server credentials are structurally identical
+    # (host/port/database/user/password + optional sslmode/sslrootcert);
+    # the connector interprets SSL/TDS options per engine.
     credentials: PostgresCredentials
 
 
@@ -390,7 +391,14 @@ class ActivityEntry(BaseModel):
     or run across the system, no matter where it lives in storage."""
 
     type: Literal[
-        "introspection", "comparison", "migration", "verification", "pipeline", "scheduled", "api_fetch"
+        "introspection",
+        "comparison",
+        "migration",
+        "verification",
+        "pipeline",
+        "scheduled",
+        "api_fetch",
+        "mel_tool",
     ]
     id: str
     label: str
@@ -632,6 +640,8 @@ class SettingsResponse(BaseModel):
     auth_enabled: bool = False
     auth_username: str | None = None
     auth_token_ttl_hours: int = 0
+    # Mel: run_sql_only (default) | always | auto
+    mel_tool_approval: str = "run_sql_only"
 
 
 class AnthropicKeyUpdate(BaseModel):
@@ -654,6 +664,7 @@ class ChatMessageIn(BaseModel):
 class ChatRequest(BaseModel):
     model: str
     messages: list[ChatMessageIn] = Field(min_length=1)
+    session_id: uuid.UUID | None = None  # links Mel tool audit rows when known
 
 
 class ChatModelsResponse(BaseModel):
@@ -708,6 +719,48 @@ class McpActiveResponse(BaseModel):
     connection_id: uuid.UUID
     name: str
     engine: str
+
+
+# --- Mel tool approval / audit ---
+
+class MelToolApprovalUpdate(BaseModel):
+    """Operator preference for Mel DB tool confirmation in chat."""
+
+    mel_tool_approval: Literal["run_sql_only", "always", "auto"]
+
+
+class MelToolApprovalStatus(BaseModel):
+    mel_tool_approval: Literal["run_sql_only", "always", "auto"]
+
+
+class MelToolDecisionRequest(BaseModel):
+    proposal_id: uuid.UUID
+    decision: Literal["approve", "deny"]
+
+
+class MelToolDecisionResponse(BaseModel):
+    ok: bool
+    proposal_id: uuid.UUID
+    decision: Literal["approve", "deny"]
+
+
+class MelToolInvocationRead(BaseModel):
+    id: uuid.UUID
+    created_at: datetime
+    finished_at: datetime | None = None
+    session_id: uuid.UUID | None = None
+    connection_id: uuid.UUID | None = None
+    connection_name: str | None = None
+    tool_name: str
+    args_redacted: dict[str, Any]
+    args_summary: str
+    decision: str
+    outcome: str
+    outcome_detail: str | None = None
+    model: str | None = None
+    proposal_id: uuid.UUID
+
+    model_config = {"from_attributes": True}
 
 
 # --- Scheduled scripts (cron) ---

@@ -15,6 +15,7 @@ from app.models.connection import Connection  # noqa: E402
 from app.models.introspection_run import IntrospectionRun  # noqa: E402
 from app.models.mapping import Mapping  # noqa: E402
 from app.models.mcp_session import McpSession  # noqa: E402
+from app.models.mel_tool_invocation import MelToolInvocation  # noqa: E402
 from app.models.migration_run import MigrationRun, MigrationRunStatus  # noqa: E402
 from app.models.migration_run_table import (  # noqa: E402
     ConflictMode,
@@ -47,6 +48,7 @@ __all__ = [
     "IntrospectionRun",
     "Mapping",
     "McpSession",
+    "MelToolInvocation",
     "MigrationRun",
     "MigrationRunStatus",
     "MigrationRunTable",

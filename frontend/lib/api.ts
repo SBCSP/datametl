@@ -4,6 +4,7 @@ import type {
   ComparisonReport,
   ComparisonSummary,
   Connection,
+  Engine,
   ConnectionDetail,
   JobEnqueued,
   JobStatus,
@@ -13,6 +14,9 @@ import type {
   LoginResponse,
   Metrics,
   AppSettings,
+  MelToolApprovalMode,
+  MelToolInvocation,
+  MelStreamEvent,
   ActiveMcp,
   ChatMessage,
   ChatModels,
@@ -125,7 +129,7 @@ export const api = {
   getConnection: (id: string) => request<ConnectionDetail>(`/api/connections/${id}`),
   createConnection: (body: {
     name: string;
-    engine: "postgres";
+    engine: Engine;
     environment?: string | null;
     credentials: PostgresCredentials;
   }) => request<Connection>("/api/connections", { method: "POST", body: JSON.stringify(body) }),
@@ -305,6 +309,21 @@ export const api = {
       method: "PUT",
       body: JSON.stringify({ api_key: apiKey }),
     }),
+  updateMelToolApproval: (mode: MelToolApprovalMode) =>
+    request<{ mel_tool_approval: MelToolApprovalMode }>("/api/settings/mel-tool-approval", {
+      method: "PUT",
+      body: JSON.stringify({ mel_tool_approval: mode }),
+    }),
+  listMelAudit: (limit = 100) =>
+    request<MelToolInvocation[]>(`/api/chat/mel-audit?limit=${limit}`),
+  decideMelTool: (proposalId: string, decision: "approve" | "deny") =>
+    request<{ ok: boolean; proposal_id: string; decision: "approve" | "deny" }>(
+      "/api/chat/tool-decision",
+      {
+        method: "POST",
+        body: JSON.stringify({ proposal_id: proposalId, decision }),
+      },
+    ),
 
   // Chat
   getChatModels: () => request<ChatModels>("/api/chat/models"),
@@ -362,12 +381,65 @@ async function streamPost(
   if (tail) opts.onToken(tail);
 }
 
-/** Stream a chat completion. Calls `onToken` with each text chunk as it arrives. */
-export function streamChat(
-  body: { model: string; messages: ChatMessage[] },
-  opts: { onToken: (chunk: string) => void; signal?: AbortSignal },
+/** Stream a Mel chat turn as NDJSON events (tokens + tool pending/result). */
+export async function streamChat(
+  body: { model: string; messages: ChatMessage[]; session_id?: string | null },
+  opts: {
+    onEvent: (ev: MelStreamEvent) => void;
+    /** @deprecated prefer onEvent; still called for token text */
+    onToken?: (chunk: string) => void;
+    signal?: AbortSignal;
+  },
 ): Promise<void> {
-  return streamPost("/api/chat/stream", body, opts);
+  const res = await fetch(`${BASE}/api/chat/stream`, {
+    method: "POST",
+    headers: { "content-type": "application/json", ...authHeaders() },
+    body: JSON.stringify(body),
+    cache: "no-store",
+    signal: opts.signal,
+  });
+  if (res.status === 401) handle401("/api/chat/stream");
+  if (!res.ok) throw new ApiError(res.status, await res.text());
+  if (!res.body) return;
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = "";
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (value) buf += decoder.decode(value, { stream: true });
+    let nl: number;
+    while ((nl = buf.indexOf("\n")) >= 0) {
+      const line = buf.slice(0, nl).trim();
+      buf = buf.slice(nl + 1);
+      if (!line) continue;
+      let ev: MelStreamEvent;
+      try {
+        ev = JSON.parse(line) as MelStreamEvent;
+      } catch {
+        // Legacy plain-text fallback (describe-sql style) — treat as token
+        opts.onToken?.(line);
+        opts.onEvent({ type: "token", text: line });
+        continue;
+      }
+      opts.onEvent(ev);
+      if (ev.type === "token") opts.onToken?.(ev.text);
+    }
+  }
+  const tail = decoder.decode();
+  if (tail) buf += tail;
+  const rem = buf.trim();
+  if (rem) {
+    try {
+      const ev = JSON.parse(rem) as MelStreamEvent;
+      opts.onEvent(ev);
+      if (ev.type === "token") opts.onToken?.(ev.text);
+    } catch {
+      opts.onToken?.(rem);
+      opts.onEvent({ type: "token", text: rem });
+    }
+  }
 }
 
 /** Ask Mel to describe a SQL script, streaming the Markdown breakdown back token by token. */

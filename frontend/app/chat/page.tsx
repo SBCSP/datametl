@@ -1,17 +1,18 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Bot, Loader2, PanelLeft, Plus, Send, Trash2 } from "lucide-react";
+import { Bot, Check, Loader2, PanelLeft, Plus, Send, Trash2, X } from "lucide-react";
 import { api, ApiError, streamChat } from "@/lib/api";
-import type { ChatMessage } from "@/lib/types";
+import type { ChatMessage, MelToolCard } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Markdown } from "@/components/markdown";
 import { Card, CardContent } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
@@ -33,7 +34,6 @@ function whenLabel(iso: string): string {
   });
 }
 
-// Shown on the empty state to invite use and showcase what Mel is good at.
 const SUGGESTIONS = [
   "Write a query to find the largest tables and their index bloat in Postgres.",
   "How do I safely add a NOT NULL column to a 50M-row table with zero downtime?",
@@ -42,44 +42,85 @@ const SUGGESTIONS = [
 ];
 
 export default function ChatPage() {
+  return (
+    <Suspense fallback={<p className="p-4 text-sm text-muted-foreground">Loading Mel…</p>}>
+      <ChatPageBody />
+    </Suspense>
+  );
+}
+
+function ChatPageBody() {
   const qc = useQueryClient();
   const router = useRouter();
+  const search = useSearchParams();
   const settings = useQuery({ queryKey: ["settings"], queryFn: api.getSettings });
   const models = useQuery({ queryKey: ["chat-models"], queryFn: api.getChatModels });
   const sessions = useQuery({ queryKey: ["chat-sessions"], queryFn: api.listChatSessions });
+  const mcpActive = useQuery({
+    queryKey: ["mcp-active"],
+    queryFn: api.getActiveMcp,
+    refetchInterval: 5_000,
+  });
 
   const [model, setModel] = useState("");
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [toolCards, setToolCards] = useState<MelToolCard[]>([]);
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
-  const [historyOpen, setHistoryOpen] = useState(false); // collapsed by default
+  const [historyOpen, setHistoryOpen] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const ambientHandled = useRef(false);
 
-  // Seed the selector with the server's default once models load.
   useEffect(() => {
     if (!model && models.data) setModel(models.data.default);
   }, [model, models.data]);
 
-  // Auto-scroll to the newest content.
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
-  }, [messages]);
+  }, [messages, toolCards]);
 
-  // Abort any in-flight stream on unmount.
   useEffect(() => () => abortRef.current?.abort(), []);
 
-  const keySet = settings.data?.anthropic_api_key_set ?? true; // assume set until known
+  // Ambient Mel: ?prompt=&connection=&mcp=1 from Ask Mel entry points
+  useEffect(() => {
+    if (ambientHandled.current) return;
+    const prompt = search.get("prompt");
+    const connectionId = search.get("connection");
+    const activateMcp = search.get("mcp") === "1";
+    if (!prompt && !connectionId) return;
+    ambientHandled.current = true;
 
-  // Save a SQL snippet from a chat response to the SQL Scripts page — stays on chat.
+    (async () => {
+      try {
+        if (activateMcp && connectionId) {
+          await api.mcpActivate(connectionId);
+          qc.invalidateQueries({ queryKey: ["mcp-active"] });
+          toast.success("MCP activated for Mel — read-only");
+        }
+      } catch (e) {
+        toast.error(`Couldn't activate MCP: ${String(e)}`);
+      }
+      if (prompt) {
+        setInput(prompt);
+        // Clear query params so refresh doesn't re-trigger
+        router.replace("/chat");
+        inputRef.current?.focus();
+      } else {
+        router.replace("/chat");
+      }
+    })();
+  }, [search, qc, router]);
+
+  const keySet = settings.data?.anthropic_api_key_set ?? true;
+
   async function saveToScripts(code: string) {
     const name = scriptName(code);
     try {
       await api.createScript({ name, content: code });
     } catch (e) {
-      // Vanishingly rare name collision (same snippet+second) — retry with a unique suffix.
       if (e instanceof ApiError && e.status === 409) {
         await api.createScript({ name: `${name} (${Math.random().toString(36).slice(2, 6)})`, content: code });
       } else {
@@ -93,24 +134,26 @@ export default function ChatPage() {
     });
   }
 
-  // Upsert the conversation after a completed turn so it survives refresh / New chat.
   async function persist(final: ChatMessage[]) {
     try {
       if (sessionId) {
         await api.updateChatSession(sessionId, { model, messages: final });
       } else {
-        const created = await api.createChatSession({ model, messages: final }); // title derived server-side
+        const created = await api.createChatSession({ model, messages: final });
         setSessionId(created.id);
       }
       qc.invalidateQueries({ queryKey: ["chat-sessions"] });
+      qc.invalidateQueries({ queryKey: ["activity"] });
+      qc.invalidateQueries({ queryKey: ["mel-audit"] });
     } catch {
-      toast.error("Couldn't save chat history"); // non-fatal — keep chatting
+      toast.error("Couldn't save chat history");
     }
   }
 
   function newChat() {
     abortRef.current?.abort();
     setMessages([]);
+    setToolCards([]);
     setInput("");
     setSessionId(null);
   }
@@ -124,6 +167,7 @@ export default function ChatPage() {
       setModel(s.model);
       setSessionId(s.id);
       setInput("");
+      setToolCards([]);
     } catch (e) {
       toast.error(`Couldn't open chat: ${String(e)}`);
     }
@@ -140,8 +184,33 @@ export default function ChatPage() {
     }
   }
 
-  async function send() {
-    const text = input.trim();
+  function upsertToolCard(card: MelToolCard) {
+    setToolCards((prev) => {
+      const i = prev.findIndex((c) => c.proposalId === card.proposalId);
+      if (i < 0) return [...prev, card];
+      const copy = [...prev];
+      copy[i] = { ...copy[i], ...card };
+      return copy;
+    });
+  }
+
+  async function decideTool(proposalId: string, decision: "approve" | "deny") {
+    setToolCards((prev) =>
+      prev.map((c) =>
+        c.proposalId === proposalId
+          ? { ...c, status: decision === "approve" ? "running" : "denied" }
+          : c,
+      ),
+    );
+    try {
+      await api.decideMelTool(proposalId, decision);
+    } catch (e) {
+      toast.error(`Couldn't ${decision}: ${String(e)}`);
+    }
+  }
+
+  async function send(override?: string) {
+    const text = (override ?? input).trim();
     if (!text || streaming || !model) return;
     const history: ChatMessage[] = [...messages, { role: "user", content: text }];
     setMessages([...history, { role: "assistant", content: "" }]);
@@ -152,24 +221,60 @@ export default function ChatPage() {
     let assembled = "";
     try {
       await streamChat(
-        { model, messages: history },
+        { model, messages: history, session_id: sessionId },
         {
           signal: ctrl.signal,
-          onToken: (chunk) => {
-            assembled += chunk;
-            setMessages((prev) => {
-              const copy = [...prev];
-              const last = copy[copy.length - 1];
-              copy[copy.length - 1] = { ...last, content: last.content + chunk };
-              return copy;
-            });
+          onEvent: (ev) => {
+            if (ev.type === "token") {
+              assembled += ev.text;
+              setMessages((prev) => {
+                const copy = [...prev];
+                const last = copy[copy.length - 1];
+                copy[copy.length - 1] = { ...last, content: last.content + ev.text };
+                return copy;
+              });
+            } else if (ev.type === "tool_pending") {
+              upsertToolCard({
+                proposalId: ev.proposal_id,
+                name: ev.name,
+                argsSummary: ev.args_summary,
+                args: ev.args,
+                status: ev.status === "auto" ? "auto" : "pending",
+              });
+            } else if (ev.type === "tool_result") {
+              const status =
+                ev.status === "denied"
+                  ? "denied"
+                  : ev.outcome === "error"
+                    ? "error"
+                    : ev.status === "auto"
+                      ? "auto"
+                      : "success";
+              upsertToolCard({
+                proposalId: ev.proposal_id,
+                name: ev.name,
+                argsSummary: ev.args_summary,
+                args: {},
+                status,
+                outcomeSummary: ev.outcome_summary,
+              });
+            } else if (ev.type === "error") {
+              assembled += `\n\n[error: ${ev.message}]`;
+              setMessages((prev) => {
+                const copy = [...prev];
+                const last = copy[copy.length - 1];
+                copy[copy.length - 1] = {
+                  ...last,
+                  content: last.content + `\n\n[error: ${ev.message}]`,
+                };
+                return copy;
+              });
+            }
           },
         },
       );
-      // Clean completion → persist the full transcript.
       await persist([...history, { role: "assistant", content: assembled }]);
     } catch (e) {
-      // Aborted (New chat / open another) → don't save a partial turn.
       if ((e as Error)?.name !== "AbortError") {
         setMessages((prev) => {
           const copy = [...prev];
@@ -190,7 +295,6 @@ export default function ChatPage() {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      {/* Top bar */}
       <header className="flex shrink-0 items-center justify-between gap-3 border-b px-4 py-2.5">
         <div className="flex min-w-0 items-center gap-2.5">
           <button
@@ -211,11 +315,18 @@ export default function ChatPage() {
           <div className="min-w-0 leading-tight">
             <div className="text-sm font-semibold">Mel</div>
             <div className="truncate text-xs text-muted-foreground">
-              Database expert — schemas, migrations, and SQL across engines
+              {mcpActive.data
+                ? `Live read-only: ${mcpActive.data.name} (${mcpActive.data.engine})`
+                : "Database expert — schemas, migrations, and SQL across engines"}
             </div>
           </div>
         </div>
         <div className="flex items-center gap-2">
+          {settings.data?.mel_tool_approval && (
+            <Badge variant="outline" className="hidden sm:inline-flex" title="Mel tool approval mode">
+              tools: {settings.data.mel_tool_approval.replace(/_/g, " ")}
+            </Badge>
+          )}
           <Select value={model} onValueChange={setModel} disabled={streaming}>
             <SelectTrigger className="w-[190px]">
               <SelectValue placeholder="Model…" />
@@ -249,7 +360,6 @@ export default function ChatPage() {
         </div>
       ) : (
         <div className="flex min-h-0 flex-1">
-          {/* History rail — collapsed by default, toggled from the top bar. */}
           <aside
             className={cn(
               "w-72 shrink-0 flex-col border-r md:flex",
@@ -309,7 +419,6 @@ export default function ChatPage() {
             </div>
           </aside>
 
-          {/* Chat column */}
           <div className="flex min-h-0 flex-1 flex-col">
             <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto">
               {messages.length === 0 ? (
@@ -321,6 +430,9 @@ export default function ChatPage() {
                   <p className="mt-1 max-w-md text-sm text-muted-foreground">
                     Your database expert for schemas, migrations, indexing, and SQL — across
                     Postgres, MySQL, SQL Server, Oracle, and more. Ask me anything.
+                    {mcpActive.data
+                      ? " A live read-only MCP connection is active — I can inspect it after you Approve tool calls."
+                      : " Activate MCP on a connection to let me inspect it live (read-only)."}
                   </p>
                   <div className="mt-6 grid w-full gap-2 sm:grid-cols-2">
                     {SUGGESTIONS.map((s) => (
@@ -368,11 +480,23 @@ export default function ChatPage() {
                       </div>
                     </div>
                   ))}
+
+                  {toolCards.length > 0 && (
+                    <div className="space-y-2 pl-11">
+                      {toolCards.map((c) => (
+                        <ToolApprovalCard
+                          key={c.proposalId}
+                          card={c}
+                          onApprove={() => void decideTool(c.proposalId, "approve")}
+                          onDeny={() => void decideTool(c.proposalId, "deny")}
+                        />
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
 
-            {/* Composer */}
             <div className="shrink-0 border-t bg-background">
               <div className="mx-auto w-full max-w-3xl px-4 py-3">
                 <div className="flex items-end gap-2 rounded-2xl border bg-card p-2 shadow-sm focus-within:border-primary/50">
@@ -403,12 +527,73 @@ export default function ChatPage() {
                   </Button>
                 </div>
                 <p className="mt-1.5 px-1 text-center text-[11px] text-muted-foreground">
-                  Mel can make mistakes — verify destructive SQL before running it.
+                  Mel can make mistakes — verify destructive SQL before running it. Live tools are
+                  read-only; {settings.data?.mel_tool_approval === "auto" ? "auto-run is on" : "run_sql waits for Approve"}{" "}
+                  (change in Settings).
                 </p>
               </div>
             </div>
           </div>
         </div>
+      )}
+    </div>
+  );
+}
+
+function ToolApprovalCard({
+  card,
+  onApprove,
+  onDeny,
+}: {
+  card: MelToolCard;
+  onApprove: () => void;
+  onDeny: () => void;
+}) {
+  const pending = card.status === "pending";
+  const statusLabel =
+    card.status === "pending"
+      ? "Needs approval"
+      : card.status === "running"
+        ? "Running…"
+        : card.status === "denied"
+          ? "Denied"
+          : card.status === "error"
+            ? "Error"
+            : card.status === "auto"
+              ? "Auto-ran"
+              : "Approved";
+
+  const variant =
+    card.status === "denied" || card.status === "error"
+      ? "destructive"
+      : card.status === "pending"
+        ? "warning"
+        : "secondary";
+
+  return (
+    <div className="rounded-xl border bg-card px-3 py-2.5 text-sm shadow-sm">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="font-mono text-xs font-semibold">{card.name || "tool"}</span>
+        <Badge variant={variant as "destructive" | "warning" | "secondary"}>{statusLabel}</Badge>
+        {pending && (
+          <span className="ml-auto flex gap-1.5">
+            <Button size="sm" variant="outline" className="h-7 px-2" onClick={onDeny}>
+              <X className="mr-1 h-3.5 w-3.5" /> Deny
+            </Button>
+            <Button size="sm" className="h-7 px-2" onClick={onApprove}>
+              <Check className="mr-1 h-3.5 w-3.5" /> Approve
+            </Button>
+          </span>
+        )}
+        {card.status === "running" && (
+          <Loader2 className="ml-auto h-4 w-4 animate-spin text-muted-foreground" />
+        )}
+      </div>
+      {card.argsSummary && (
+        <p className="mt-1.5 font-mono text-xs text-muted-foreground break-all">{card.argsSummary}</p>
+      )}
+      {card.outcomeSummary && (
+        <p className="mt-1 text-xs text-muted-foreground">{card.outcomeSummary}</p>
       )}
     </div>
   );

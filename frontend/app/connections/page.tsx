@@ -4,10 +4,12 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Database, Plus } from "lucide-react";
+import { Bot, Database, Plus } from "lucide-react";
+import { askMelAboutConnection } from "@/lib/mel-context";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { envStyle } from "@/lib/environments";
+import { engineLabel } from "@/lib/engines";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -119,7 +121,7 @@ export default function ConnectionsPage() {
                       )}
                     </TableCell>
                     <TableCell>
-                      <Badge variant="secondary">{c.engine}</Badge>
+                      <Badge variant="secondary">{engineLabel(c.engine)}</Badge>
                     </TableCell>
                     <TableCell className="text-muted-foreground">
                       {new Date(c.created_at).toLocaleString()}
@@ -145,6 +147,11 @@ export default function ConnectionsPage() {
                           Activate MCP
                         </Button>
                       )}
+                      <Button size="sm" variant="outline" asChild>
+                        <Link href={askMelAboutConnection(c.name, c.id)}>
+                          <Bot className="h-3.5 w-3.5" /> Ask Mel
+                        </Link>
+                      </Button>
                       <Button
                         size="sm"
                         variant="outline"
@@ -196,7 +203,7 @@ function EmptyState() {
         <div>
           <h3 className="text-base font-semibold">No connections yet</h3>
           <p className="text-sm text-muted-foreground mt-1 max-w-sm">
-            Add your source database (e.g. a Supabase project) and your destination (vanilla Postgres) to get started.
+            Add a PostgreSQL or MySQL source/destination to get started.
           </p>
         </div>
         <Button asChild>

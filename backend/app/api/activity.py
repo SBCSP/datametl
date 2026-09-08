@@ -20,6 +20,7 @@ from app.db import get_db
 from app.models.comparison import Comparison
 from app.models.connection import Connection
 from app.models.introspection_run import IntrospectionRun
+from app.models.mel_tool_invocation import MelToolInvocation
 from app.models.migration_run import MigrationRun
 from app.models.pipeline import Pipeline, PipelineRun
 from app.models.scheduled_script import ScheduledRun, ScheduledScript
@@ -220,6 +221,35 @@ def list_activity(
                 finished_at=tr.finished_at,
                 detail=detail,
                 href=f"/taps/{tr.tap_id}",
+            )
+        )
+
+
+    # Mel tool invocations (approve-to-run audit).
+    mel_rows = list(
+        db.execute(
+            select(MelToolInvocation)
+            .order_by(MelToolInvocation.created_at.desc())
+            .limit(limit_per_type)
+        ).scalars()
+    )
+    for m in mel_rows:
+        status = m.outcome if m.outcome != "pending" else "pending"
+        if status == "success":
+            status = "succeeded"
+        detail_bits = [m.decision, m.args_summary]
+        if m.outcome_detail:
+            detail_bits.append(m.outcome_detail)
+        out.append(
+            ActivityEntry(
+                type="mel_tool",
+                id=str(m.id),
+                label=f"Mel: {m.tool_name}" + (f" @ {m.connection_name}" if m.connection_name else ""),
+                status=status,
+                started_at=m.created_at,
+                finished_at=m.finished_at,
+                detail=" · ".join(x for x in detail_bits if x),
+                href="/chat",
             )
         )
 

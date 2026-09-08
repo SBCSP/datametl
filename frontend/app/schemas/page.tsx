@@ -8,6 +8,7 @@ import { Database, Loader2, RefreshCw, Workflow } from "lucide-react";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { envStyle } from "@/lib/environments";
+import { engineLabel } from "@/lib/engines";
 import type { SnapshotSummary } from "@/lib/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -103,7 +104,7 @@ export default function SchemasIndexPage() {
                         )}
                       </TableCell>
                       <TableCell>
-                        <Badge variant="secondary">{c.engine}</Badge>
+                        <Badge variant="secondary">{engineLabel(c.engine)}</Badge>
                       </TableCell>
                       <TableCell className="text-muted-foreground whitespace-nowrap text-sm">
                         {!snaps ? (

@@ -5,7 +5,8 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { AlertTriangle, ArrowRight, CheckCircle2, Database, Loader2, XCircle } from "lucide-react";
+import { AlertTriangle, ArrowRight, Bot, CheckCircle2, Database, Loader2, XCircle } from "lucide-react";
+import { askMelAboutMigration } from "@/lib/mel-context";
 import { api } from "@/lib/api";
 import { useJob } from "@/lib/use-job";
 import type { CheckResult, MigrationRunStatus, TableRunStatus } from "@/lib/types";
@@ -128,7 +129,12 @@ function MigrationRunBody({ params }: { params: Promise<{ id: string }> }) {
           { label: r.id.slice(0, 8) + "…" },
         ]}
         actions={
-          <>
+          <Button asChild variant="outline">
+              <Link href={askMelAboutMigration(`Migration ${id.slice(0, 8)}…`)}>
+                <Bot className="h-4 w-4" /> Ask Mel
+              </Link>
+            </Button>
+            <>
             <Button asChild variant="outline">
               <Link href={`/comparisons/${r.comparison_id}`}>Open comparison</Link>
             </Button>

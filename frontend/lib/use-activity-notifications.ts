@@ -17,6 +17,7 @@ const TYPE_LABEL: Record<ActivityEntry["type"], string> = {
   pipeline: "Pipeline",
   scheduled: "Schedule",
   api_fetch: "Tap",
+  mel_tool: "Mel tool",
 };
 
 /** Mounted at the AppShell level so toasts fire on any page. Polls activity every 3s,

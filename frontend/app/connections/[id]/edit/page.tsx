@@ -16,6 +16,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { PageHeader } from "@/components/page-header";
 import { ENVIRONMENTS, type Environment, envStyle } from "@/lib/environments";
+import { engineLabel } from "@/lib/engines";
 
 const SSL_MODES = ["disable", "allow", "prefer", "require", "verify-ca", "verify-full"] as const;
 type SslMode = (typeof SSL_MODES)[number];
@@ -133,10 +134,16 @@ export default function EditConnectionPage({ params }: { params: Promise<{ id: s
       <div className="max-w-3xl">
         <Card>
           <CardHeader>
-            <CardTitle>Postgres</CardTitle>
-            <CardDescription>Credentials are encrypted at rest with Fernet.</CardDescription>
+            <CardTitle>{engineLabel(data.engine)}</CardTitle>
+            <CardDescription>Credentials are encrypted at rest with Fernet. Engine cannot be changed after create.</CardDescription>
           </CardHeader>
           <CardContent className="grid grid-cols-2 gap-4">
+            <Field label="Engine" col2>
+              <div className="flex items-center gap-2">
+                <Badge variant="secondary">{engineLabel(data.engine)}</Badge>
+                <span className="text-xs text-muted-foreground">Read-only — create a new connection to switch engines.</span>
+              </div>
+            </Field>
             <Field label="Name" col2>
               <Input value={form.name} onChange={(e) => set("name", e.target.value)} />
             </Field>

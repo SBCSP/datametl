@@ -9,14 +9,25 @@ from __future__ import annotations
 import re
 
 from arq.connections import RedisSettings, create_pool
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from app.api.schemas_io import AnthropicKeyStatus, AnthropicKeyUpdate, SettingsResponse
+from app.api.schemas_io import (
+    AnthropicKeyStatus,
+    AnthropicKeyUpdate,
+    MelToolApprovalStatus,
+    MelToolApprovalUpdate,
+    SettingsResponse,
+)
 from app.config import settings as cfg
 from app.db import get_db
 from app.jobs.worker import WorkerSettings
-from app.settings_store import has_anthropic_key, set_anthropic_key
+from app.settings_store import (
+    get_mel_tool_approval,
+    has_anthropic_key,
+    set_anthropic_key,
+    set_mel_tool_approval,
+)
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
@@ -61,6 +72,7 @@ async def get_settings(db: Session = Depends(get_db)) -> SettingsResponse:
         auth_enabled=cfg.auth_enabled,
         auth_username=cfg.auth_username,
         auth_token_ttl_hours=cfg.auth_token_ttl_hours,
+        mel_tool_approval=get_mel_tool_approval(db),
     )
 
 
@@ -71,3 +83,15 @@ def update_anthropic_key(
     """Store (or clear, when blank) the Anthropic API key. Write-only — never returned."""
     set_anthropic_key(db, payload.api_key)
     return AnthropicKeyStatus(anthropic_api_key_set=has_anthropic_key(db))
+
+
+@router.put("/mel-tool-approval", response_model=MelToolApprovalStatus)
+def update_mel_tool_approval(
+    payload: MelToolApprovalUpdate, db: Session = Depends(get_db)
+) -> MelToolApprovalStatus:
+    """How Mel DB tools are confirmed in chat: run_sql_only (default), always, or auto."""
+    try:
+        mode = set_mel_tool_approval(db, payload.mel_tool_approval)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+    return MelToolApprovalStatus(mel_tool_approval=mode)  # type: ignore[arg-type]

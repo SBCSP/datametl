@@ -1,6 +1,6 @@
 // Hand-mirrors backend pydantic models. Switch to openapi-typescript codegen later if needed.
 
-export type Engine = "postgres";
+export type Engine = "postgres" | "mysql" | "mssql";
 
 export type NormalizedType =
   | "string" | "int16" | "int32" | "int64" | "float32" | "float64" | "decimal"
@@ -384,7 +384,8 @@ export type ActivityType =
   | "verification"
   | "pipeline"
   | "scheduled"
-  | "api_fetch";
+  | "api_fetch"
+  | "mel_tool";
 
 export interface ActivityEntry {
   type: ActivityType;
@@ -460,6 +461,58 @@ export interface AppSettings {
   auth_enabled: boolean;
   auth_username: string | null;
   auth_token_ttl_hours: number;
+  /** run_sql_only (default) | always | auto */
+  mel_tool_approval: "run_sql_only" | "always" | "auto";
+}
+
+export type MelToolApprovalMode = AppSettings["mel_tool_approval"];
+
+export interface MelToolInvocation {
+  id: string;
+  created_at: string;
+  finished_at?: string | null;
+  session_id?: string | null;
+  connection_id?: string | null;
+  connection_name?: string | null;
+  tool_name: string;
+  args_redacted: Record<string, unknown>;
+  args_summary: string;
+  decision: string;
+  outcome: string;
+  outcome_detail?: string | null;
+  model?: string | null;
+  proposal_id: string;
+}
+
+export type MelStreamEvent =
+  | { type: "token"; text: string }
+  | {
+      type: "tool_pending";
+      proposal_id: string;
+      name: string;
+      args: Record<string, unknown>;
+      args_summary: string;
+      status: "pending" | "auto";
+    }
+  | {
+      type: "tool_result";
+      proposal_id: string;
+      name: string;
+      args_summary: string;
+      status: string;
+      outcome?: string;
+      outcome_summary?: string;
+    }
+  | { type: "error"; message: string }
+  | { type: "done" };
+
+export interface MelToolCard {
+  proposalId: string;
+  name: string;
+  argsSummary: string;
+  args: Record<string, unknown>;
+  status: "pending" | "auto" | "approved" | "denied" | "success" | "error" | "running";
+  outcomeSummary?: string;
 }
 
 // --- Chat ---

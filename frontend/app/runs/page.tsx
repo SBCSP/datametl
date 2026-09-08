@@ -13,6 +13,7 @@ import {
   Network,
   Radio,
   ShieldCheck,
+  Bot,
 } from "lucide-react";
 import { api } from "@/lib/api";
 import type { ActivityEntry, ActivityType } from "@/lib/types";
@@ -30,6 +31,7 @@ const TYPE_META: Record<ActivityType, { icon: React.ComponentType<{ className?: 
   pipeline: { icon: Network, label: "Pipeline" },
   scheduled: { icon: CalendarClock, label: "Schedule" },
   api_fetch: { icon: Radio, label: "Tap" },
+  mel_tool: { icon: Bot, label: "Mel" },
 };
 
 const STATUS_VARIANT: Record<string, "secondary" | "warning" | "success" | "destructive" | "outline"> = {
@@ -54,6 +56,7 @@ const TYPES: (ActivityType | typeof ALL)[] = [
   "verification",
   "pipeline",
   "scheduled",
+  "mel_tool",
 ];
 
 export default function RunsPage() {
@@ -70,7 +73,7 @@ export default function RunsPage() {
     <div>
       <PageHeader
         title="Runs"
-        description="Unified activity log — every introspection, comparison, migration, and verification across the system."
+        description="Unified activity log — introspections, comparisons, migrations, verifications, and Mel tool calls."
       />
 
       <div className="mb-3 flex flex-wrap gap-2">
