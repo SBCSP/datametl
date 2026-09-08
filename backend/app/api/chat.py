@@ -3,6 +3,7 @@
 Mel streams NDJSON events (token / tool_pending / tool_result / error / done). When a live
 MCP connection is active, Mel may call read-only DB tools; depending on settings, run_sql
 (and optionally all tools) pause for Approve/Deny in the chat UI before executing.
+Approve/Deny waiters are Redis-backed so any API worker can resolve a pending proposal.
 """
 from __future__ import annotations
 
@@ -442,7 +443,7 @@ async def chat_stream(payload: ChatRequest, db: Session = Depends(get_db)) -> St
 @router.post("/tool-decision", response_model=MelToolDecisionResponse)
 async def tool_decision(payload: MelToolDecisionRequest) -> MelToolDecisionResponse:
     """Approve or deny a pending Mel tool proposal from the chat UI."""
-    ok = resolve_decision(payload.proposal_id, payload.decision)
+    ok = await resolve_decision(payload.proposal_id, payload.decision)
     if not ok:
         raise HTTPException(404, "No pending tool proposal with that id (already decided or expired).")
     return MelToolDecisionResponse(

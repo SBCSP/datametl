@@ -1,15 +1,31 @@
-"""Mel tool approval: which tools need operator confirm, and in-flight proposal waiters.
+"""Mel tool approval: which tools need operator confirm, and Redis-backed proposal waiters.
 
-Pending proposals live in-process (single uvicorn worker is the local-first default). The chat
-stream emits a `tool_pending` event, then awaits the Future until the UI POSTs approve/deny.
+Pending proposals live in Redis (keyed by proposal id) with a TTL so Approve/Deny works
+across multiple uvicorn / API workers. The chat stream emits `tool_pending`, then
+`wait_decision` polls Redis until another process POSTs approve/deny (or timeout).
+
+Fail-closed: Redis is required. If Redis is unavailable, `register_proposal` /
+`wait_decision` raise and `resolve_decision` returns False — tools never auto-run.
+There is no in-process Future fallback: that would silently break multi-worker safety.
+(Redis is already required for arq job queues.)
 """
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
+import logging
 import re
+import time
 import uuid
-from typing import Any
+from typing import Any, Protocol
+
+import redis.asyncio as redis
+from redis.exceptions import RedisError
+
+from app.config import settings
+
+logger = logging.getLogger(__name__)
 
 # Tools Mel may call against the active read-only MCP connection.
 MEL_TOOLS = frozenset({"list_tables", "describe_table", "run_sql"})
@@ -26,11 +42,80 @@ _SECRET_KEY_RE = re.compile(
     re.IGNORECASE,
 )
 
-# proposal_id (str) → Future that resolves to "approve" | "deny"
-_pending: dict[str, asyncio.Future[str]] = {}
-_lock = asyncio.Lock()
-
 APPROVAL_TIMEOUT_S = 300.0  # 5 minutes — operator walked away
+_KEY_PREFIX = "datametl:mel:approval:"
+# Keep the key a bit past the waiter timeout so a late resolve still sees "pending"→deny cleanup.
+_TTL_S = int(APPROVAL_TIMEOUT_S) + 60
+_POLL_INTERVAL_S = 0.1
+
+# Atomic: only transition pending → approve|deny (returns 1 if we won the race).
+_RESOLVE_LUA = """
+local cur = redis.call('GET', KEYS[1])
+if cur == 'pending' then
+  redis.call('SET', KEYS[1], ARGV[1], 'KEEPTTL')
+  return 1
+end
+return 0
+"""
+
+
+class MelApprovalRedisUnavailable(RuntimeError):
+    """Raised when Redis cannot store or wait on a Mel approval (fail closed)."""
+
+
+class _AsyncRedisLike(Protocol):
+    async def get(self, name: str) -> str | None: ...
+    async def set(
+        self,
+        name: str,
+        value: str,
+        ex: int | None = None,
+        xx: bool = False,
+        keepttl: bool = False,
+    ) -> bool | None: ...
+    async def delete(self, *names: str) -> int: ...
+    async def eval(
+        self, script: str, numkeys: int, *keys_and_args: str
+    ) -> Any: ...
+    async def scan(
+        self, cursor: int = 0, match: str | None = None, count: int | None = None
+    ) -> tuple[int, list[str]]: ...
+    async def aclose(self) -> None: ...
+    async def ping(self) -> bool: ...
+
+
+_client: _AsyncRedisLike | None = None
+_client_lock = asyncio.Lock()
+
+
+def _key(proposal_id: uuid.UUID | str) -> str:
+    return f"{_KEY_PREFIX}{proposal_id}"
+
+
+def set_redis_client_for_tests(client: _AsyncRedisLike | None) -> None:
+    """Inject a fake/async Redis (or reset to None) — tests only."""
+    global _client
+    _client = client
+
+
+async def _get_client() -> _AsyncRedisLike:
+    global _client
+    if _client is not None:
+        return _client
+    async with _client_lock:
+        if _client is None:
+            _client = redis.from_url(settings.redis_url, decode_responses=True)
+        return _client
+
+
+async def close_redis_client() -> None:
+    """Close the shared async Redis client (tests / shutdown)."""
+    global _client
+    async with _client_lock:
+        if _client is not None:
+            with contextlib.suppress(Exception):
+                await _client.aclose()
+            _client = None
 
 
 def needs_approval(tool_name: str, mode: str) -> bool:
@@ -107,51 +192,114 @@ def outcome_summary(result_json: str, *, denied: bool = False, error: str | None
     return "ok"
 
 
-async def register_proposal(proposal_id: uuid.UUID | str) -> asyncio.Future[str]:
-    """Create a waiter Future for this proposal (call before emitting tool_pending)."""
-    key = str(proposal_id)
-    loop = asyncio.get_running_loop()
-    fut: asyncio.Future[str] = loop.create_future()
-    async with _lock:
-        old = _pending.pop(key, None)
-        if old is not None and not old.done():
-            old.set_result("deny")  # replace stale
-        _pending[key] = fut
-    return fut
+async def register_proposal(proposal_id: uuid.UUID | str) -> None:
+    """Mark a proposal pending in Redis (call before emitting tool_pending).
+
+    Replaces any stale pending/decided value for the same id. Raises
+    MelApprovalRedisUnavailable if Redis cannot be reached (fail closed).
+    """
+    key = _key(proposal_id)
+    try:
+        client = await _get_client()
+        await client.set(key, "pending", ex=_TTL_S)
+    except (RedisError, OSError, TimeoutError) as e:
+        logger.error("Mel approval register failed (Redis unavailable): %s", e)
+        raise MelApprovalRedisUnavailable(
+            "Redis unavailable — cannot register Mel tool approval (fail closed)."
+        ) from e
 
 
 async def wait_decision(proposal_id: uuid.UUID | str, timeout: float = APPROVAL_TIMEOUT_S) -> str:
-    """Block until Approve/Deny (or timeout → deny). Cleans up the waiter."""
-    key = str(proposal_id)
-    async with _lock:
-        fut = _pending.get(key)
-    if fut is None:
-        fut = await register_proposal(proposal_id)
+    """Block until Approve/Deny (or timeout → deny). Cleans up the Redis key.
+
+    Polls Redis so any worker that called resolve_decision can wake this waiter.
+    Fail closed: Redis errors raise MelApprovalRedisUnavailable (caller must not
+    execute the tool). Missing/expired keys are treated as deny.
+    """
+    key = _key(proposal_id)
+    deadline = time.monotonic() + timeout
     try:
-        return await asyncio.wait_for(asyncio.shield(fut), timeout=timeout)
-    except TimeoutError:
-        resolve_decision(proposal_id, "deny")
-        return "deny"
-    finally:
-        async with _lock:
-            _pending.pop(key, None)
+        client = await _get_client()
+    except (RedisError, OSError, TimeoutError) as e:
+        logger.error("Mel approval wait failed to connect Redis: %s", e)
+        raise MelApprovalRedisUnavailable(
+            "Redis unavailable — cannot wait for Mel tool approval (fail closed)."
+        ) from e
+
+    # Ensure a pending key exists (idempotent if register already ran).
+    try:
+        existing = await client.get(key)
+        if existing is None:
+            await client.set(key, "pending", ex=_TTL_S)
+        elif existing in ("approve", "deny"):
+            await client.delete(key)
+            return existing
+    except (RedisError, OSError, TimeoutError) as e:
+        logger.error("Mel approval wait Redis error: %s", e)
+        raise MelApprovalRedisUnavailable(
+            "Redis unavailable — cannot wait for Mel tool approval (fail closed)."
+        ) from e
+
+    while True:
+        try:
+            val = await client.get(key)
+        except (RedisError, OSError, TimeoutError) as e:
+            logger.error("Mel approval wait Redis error: %s", e)
+            raise MelApprovalRedisUnavailable(
+                "Redis unavailable — cannot wait for Mel tool approval (fail closed)."
+            ) from e
+
+        if val in ("approve", "deny"):
+            with contextlib.suppress(RedisError, OSError, TimeoutError):
+                await client.delete(key)
+            return val
+
+        if val is None:
+            # TTL expired or cleared elsewhere — fail closed
+            return "deny"
+
+        if time.monotonic() >= deadline:
+            await resolve_decision(proposal_id, "deny")
+            # Best-effort cleanup; resolve already set deny
+            with contextlib.suppress(RedisError, OSError, TimeoutError):
+                final = await client.get(key)
+                if final in ("approve", "deny"):
+                    await client.delete(key)
+                    return final
+            return "deny"
+
+        await asyncio.sleep(_POLL_INTERVAL_S)
 
 
-def resolve_decision(proposal_id: uuid.UUID | str, decision: str) -> bool:
-    """Called by the Approve/Deny API. Returns False if no pending proposal."""
+async def resolve_decision(proposal_id: uuid.UUID | str, decision: str) -> bool:
+    """Called by the Approve/Deny API. Returns False if no pending proposal or Redis down."""
     if decision not in ("approve", "deny"):
         return False
-    key = str(proposal_id)
-    fut = _pending.get(key)
-    if fut is None or fut.done():
+    key = _key(proposal_id)
+    try:
+        client = await _get_client()
+        changed = await client.eval(_RESOLVE_LUA, 1, key, decision)
+        return int(changed or 0) == 1
+    except (RedisError, OSError, TimeoutError) as e:
+        logger.error("Mel approval resolve failed (Redis unavailable): %s", e)
         return False
-    fut.set_result(decision)
-    return True
 
 
-def clear_all_pending() -> None:
-    """Test helper — cancel every waiter."""
-    for fut in list(_pending.values()):
-        if not fut.done():
-            fut.set_result("deny")
-    _pending.clear()
+async def clear_all_pending() -> None:
+    """Test helper — delete every Mel approval key under the prefix."""
+    try:
+        client = await _get_client()
+    except (RedisError, OSError, TimeoutError):
+        return
+    cursor = 0
+    pattern = f"{_KEY_PREFIX}*"
+    try:
+        while True:
+            cursor, keys = await client.scan(cursor=cursor, match=pattern, count=100)
+            if keys:
+                await client.delete(*keys)
+            if cursor == 0:
+                break
+    except (RedisError, OSError, TimeoutError, AttributeError):
+        # Fake clients may only support delete of known keys; ignore.
+        pass
