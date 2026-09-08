@@ -35,14 +35,21 @@ from app.config import settings
 
 logging.basicConfig(level=settings.log_level)
 
+_docs = "/docs" if settings.docs_enabled else None
+_redoc = "/redoc" if settings.docs_enabled else None
+_openapi = "/openapi.json" if settings.docs_enabled else None
+
 app = FastAPI(
     title="DataMETL",
     description="Local-first data migration tool — schema introspection, comparison, and mapping API",
     version="0.1.0",
+    docs_url=_docs,
+    redoc_url=_redoc,
+    openapi_url=_openapi,
 )
 
 # Endpoints reachable without a bearer token (only consulted when AUTH_ENABLED).
-_AUTH_OPEN_EXACT = {"/health", "/openapi.json", "/api/auth/login", "/api/auth/status"}
+_AUTH_OPEN_EXACT = {"/health", "/api/auth/login", "/api/auth/status"} | ({"/openapi.json"} if settings.docs_enabled else set())
 
 
 class AuthMiddleware(BaseHTTPMiddleware):
@@ -55,7 +62,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
         if not settings.auth_enabled:
             return await call_next(request)
         path = request.url.path
-        if request.method == "OPTIONS" or path in _AUTH_OPEN_EXACT or path.startswith("/docs"):
+        if request.method == "OPTIONS" or path in _AUTH_OPEN_EXACT or (settings.docs_enabled and path.startswith("/docs")):
             return await call_next(request)
         if path.startswith("/api/"):
             header = request.headers.get("authorization", "")

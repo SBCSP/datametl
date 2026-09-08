@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -27,6 +27,22 @@ class Settings(BaseSettings):
     # Set METRICS_TOKEN to require `Authorization: Bearer <token>` from the scraper.
     metrics_enabled: bool = Field(True, alias="METRICS_ENABLED")
     metrics_token: str = Field("", alias="METRICS_TOKEN")
+
+    # OpenAPI /docs. Disable in production deploy (see DOCS_ENABLED in .env.deploy.example).
+    docs_enabled: bool = Field(True, alias="DOCS_ENABLED")
+
+    @field_validator("encryption_key")
+    @classmethod
+    def _reject_placeholder_encryption_key(cls, v: str) -> str:
+        key = (v or "").strip()
+        placeholders = {"", "CHANGE_ME", "CHANGE_ME_GENERATE_A_FERNET_KEY"}
+        if key in placeholders or key.upper().startswith("CHANGE_ME"):
+            raise ValueError(
+                "ENCRYPTION_KEY is missing or a placeholder. "
+                "Generate one with `make key` (or openssl rand -base64 32) "
+                "and set it in .env before starting."
+            )
+        return key
 
     @property
     def cors_origin_list(self) -> list[str]:

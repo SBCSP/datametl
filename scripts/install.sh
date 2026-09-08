@@ -66,18 +66,61 @@ generate_key() {
   openssl rand -base64 32 | tr '+/' '-_'
 }
 
+# --- .env helpers ---
+set_env() {
+  # set_env KEY VALUE — portable in-place sed for .env
+  local k="$1" v="$2"
+  if [ "$(uname)" = "Darwin" ]; then
+    sed -i '' "s|^${k}=.*|${k}=${v}|" .env
+  else
+    sed -i "s|^${k}=.*|${k}=${v}|" .env
+  fi
+}
+
+generate_db_password() {
+  openssl rand -hex 24
+}
+
+is_placeholder_key() {
+  local key="$1"
+  case "$key" in
+    ""|CHANGE_ME|CHANGE_ME_GENERATE_A_FERNET_KEY|CHANGE_ME*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+is_weak_db_password() {
+  local pw="$1"
+  case "$pw" in
+    ""|datametl|password|CHANGE_ME|CHANGE_ME_INSTALL_WILL_REPLACE|CHANGE_ME*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 # --- .env setup ---
 if [ ! -f .env ]; then
   cp .env.example .env
   KEY="$(generate_key)"
-  if [ "$(uname)" = "Darwin" ]; then
-    sed -i '' "s|^ENCRYPTION_KEY=.*|ENCRYPTION_KEY=${KEY}|" .env
-  else
-    sed -i "s|^ENCRYPTION_KEY=.*|ENCRYPTION_KEY=${KEY}|" .env
-  fi
-  info "Generated .env with a fresh Fernet encryption key."
+  DBPASS="$(generate_db_password)"
+  set_env ENCRYPTION_KEY "$KEY"
+  set_env APP_DB_PASSWORD "$DBPASS"
+  info "Generated .env with a fresh Fernet encryption key and strong APP_DB_PASSWORD."
 else
   warn ".env already exists — keeping it. (Delete it and re-run if you want a fresh setup.)"
+fi
+
+# Refuse to start with an empty/placeholder ENCRYPTION_KEY (startup would fail anyway).
+CURRENT_KEY="$(grep -E "^ENCRYPTION_KEY=" .env | head -1 | cut -d= -f2- || true)"
+if is_placeholder_key "$CURRENT_KEY"; then
+  err "ENCRYPTION_KEY in .env is empty or a placeholder. Set a real Fernet key (install.sh generates one on first run) before starting."
+fi
+
+# Upgrade weak default APP_DB_PASSWORD if still present (first-time or copied example).
+CURRENT_DBPASS="$(grep -E "^APP_DB_PASSWORD=" .env | head -1 | cut -d= -f2- || true)"
+if is_weak_db_password "$CURRENT_DBPASS"; then
+  DBPASS="$(generate_db_password)"
+  set_env APP_DB_PASSWORD "$DBPASS"
+  info "Replaced weak/default APP_DB_PASSWORD with a strong random value."
 fi
 
 # --- Drop a Makefile so end users get the same `make`-based workflow as devs ---
@@ -142,4 +185,8 @@ echo "  Stop:    make down"
 echo "  Update:  make update      (pulls latest images + restarts)"
 echo "  Logs:    make logs"
 echo "  Help:    make help        (full target list)"
+echo ""
+echo "Security:"
+echo "  Put this deploy behind SSO (oauth2-proxy/Keycloak) OR set AUTH_ENABLED=true"
+echo "  in .env with a strong AUTH_PASSWORD. /docs is disabled by default (DOCS_ENABLED)."
 echo ""

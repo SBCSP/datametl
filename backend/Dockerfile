@@ -17,16 +17,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && pip install --no-cache-dir 'uv>=0.5,<0.6'
 
 # --- deps layer (cached unless pyproject/lock changes) ---
-COPY pyproject.toml ./
-COPY uv.lock* ./
+# Require uv.lock — fail closed (no unfrozen fallback).
+COPY pyproject.toml uv.lock ./
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-install-project 2>/dev/null || \
-    uv sync --no-install-project
+    uv sync --frozen --no-install-project
 
 # --- app layer ---
 COPY . .
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen 2>/dev/null || uv sync
+    uv sync --frozen
 
 ENV PATH="/opt/venv/bin:$PATH"
 

@@ -1,15 +1,25 @@
-COMPOSE := docker compose -f infra/docker-compose.yml --env-file .env
-COMPOSE_SAMPLES := $(COMPOSE) -f infra/docker-compose.samples.yml --profile samples
+# Repo-root paths so targets work even if make is invoked with -C / another cwd.
+ROOT := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
+ENV_FILE := $(ROOT)/.env
+COMPOSE := $(ROOT)/scripts/dev-compose.sh
+COMPOSE_SAMPLES := $(COMPOSE) -f $(ROOT)/infra/docker-compose.samples.yml --profile samples
+COMPOSE_ENGINES := $(COMPOSE) -f $(ROOT)/infra/docker-compose.engines.yml
+COMPOSE_ALL := $(COMPOSE) -f $(ROOT)/infra/docker-compose.samples.yml -f $(ROOT)/infra/docker-compose.engines.yml --profile samples --profile mysql --profile mssql --profile engines
 
-.PHONY: help up up-samples urls down logs ps build rebuild migrate revision shell-backend shell-db psql redis-cli test lint typecheck fmt clean key release deploy-up deploy-pull deploy-down deploy-build-local
+.PHONY: help ensure-env up up-samples up-mysql up-mssql up-engines urls db-urls down logs ps build rebuild migrate revision shell-backend shell-db psql redis-cli test lint typecheck fmt clean key release deploy-up deploy-pull deploy-down deploy-build-local
 
 help:
 	@echo "DataMETL — common commands"
 	@echo "  make key            Generate a Fernet encryption key (paste into .env)"
+	@echo "  make ensure-env     Create .env from example if missing (sets ENCRYPTION_KEY)"
 	@echo "  make up             Build (if needed) and start app stack"
 	@echo "  make up-samples     Build (if needed) and start app stack + sample source/dest databases"
+	@echo "  make up-mysql       Start MySQL test engine (profile mysql; host port 3307)"
+	@echo "  make up-mssql       Start SQL Server test engine (profile mssql; host port 14333)"
+	@echo "  make up-engines     Start MySQL + SQL Server test engines together"
 	@echo "  make urls           Print the localhost URLs for the running stack"
-	@echo "  make down           Stop everything (volumes preserved)"
+	@echo "  make db-urls        Print connection hints for sample + engine test DBs"
+	@echo "  make down           Stop everything including samples/engines (volumes preserved)"
 	@echo "  make logs           Tail logs from all services"
 	@echo "  make ps             List running services"
 	@echo "  make build          Build all images"
@@ -31,15 +41,49 @@ help:
 	@echo "  make deploy-down         Stop the deploy stack"
 
 key:
-	@python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+	@python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())" 2>/dev/null \
+	  || python3 -c "import base64,os; print(base64.urlsafe_b64encode(os.urandom(32)).decode())"
 
-up:
+# Create .env from the example if needed, and refuse a placeholder ENCRYPTION_KEY.
+ensure-env:
+	@if [ ! -f "$(ENV_FILE)" ]; then \
+	  cp "$(ROOT)/.env.example" "$(ENV_FILE)"; \
+	  KEY=$$( $(MAKE) --no-print-directory key ); \
+	  if [ "$$(uname)" = "Darwin" ]; then \
+	    sed -i '' "s|^ENCRYPTION_KEY=.*|ENCRYPTION_KEY=$$KEY|" "$(ENV_FILE)"; \
+	  else \
+	    sed -i "s|^ENCRYPTION_KEY=.*|ENCRYPTION_KEY=$$KEY|" "$(ENV_FILE)"; \
+	  fi; \
+	  echo "Created $(ENV_FILE) with a fresh ENCRYPTION_KEY."; \
+	  echo "Edit AUTH_* / other settings as needed, then re-run make up."; \
+	fi
+	@if grep -qE '^ENCRYPTION_KEY=(CHANGE_ME_GENERATE_A_FERNET_KEY)?[[:space:]]*$$' "$(ENV_FILE)"; then \
+	  echo "ENCRYPTION_KEY in $(ENV_FILE) is missing or still a placeholder."; \
+	  echo "Run: make key   then paste into .env"; \
+	  exit 1; \
+	fi
+
+up: ensure-env
 	@$(COMPOSE) up -d --build
+	@$(MAKE) --no-print-directory migrate
 	@$(MAKE) --no-print-directory urls
 
-up-samples:
+up-samples: ensure-env
 	@$(COMPOSE_SAMPLES) up -d --build
+	@$(MAKE) --no-print-directory migrate
 	@$(MAKE) --no-print-directory urls SAMPLES=1
+
+up-mysql: ensure-env
+	@$(COMPOSE_ENGINES) --profile mysql up -d
+	@$(MAKE) --no-print-directory db-urls MYSQL=1
+
+up-mssql: ensure-env
+	@$(COMPOSE_ENGINES) --profile mssql up -d
+	@$(MAKE) --no-print-directory db-urls MSSQL=1
+
+up-engines: ensure-env
+	@$(COMPOSE_ENGINES) --profile engines up -d
+	@$(MAKE) --no-print-directory db-urls MYSQL=1 MSSQL=1
 
 urls:
 	@printf '\n\033[1mDataMETL is up.\033[0m\n'
@@ -47,16 +91,36 @@ urls:
 	@printf '  \033[36mAPI (OpenAPI)\033[0m    http://localhost:8001/docs\n'
 	@printf '  \033[36mAPI health\033[0m       http://localhost:8001/health\n'
 	@printf '  \033[2mApp metadata DB\033[0m  postgres://datametl:datametl@localhost:5433/datametl\n'
-	@printf '  \033[2mRedis\033[0m            redis://localhost:6379\n'
+	@printf '  \033[2mRedis\033[0m            redis://localhost:6380\n'
 ifeq ($(SAMPLES),1)
 	@printf '  \033[2mSample source\033[0m    postgres://postgres:samplesource@localhost:5500/source  (Supabase-flavored)\n'
 	@printf '  \033[2mSample dest\033[0m      postgres://postgres:sampledest@localhost:5501/dest      (vanilla)\n'
 	@printf '  \033[33mNote:\033[0m when adding these in the UI, use host \033[1msample-source\033[0m / \033[1msample-dest\033[0m and port \033[1m5432\033[0m (compose network names).\n'
 endif
+ifeq ($(MYSQL),1)
+	@printf '  \033[2mEngine MySQL\033[0m     mysql://root:$${ENGINE_MYSQL_PASSWORD:-EngineMySQL_ChangeMe!}@localhost:3307/$${ENGINE_MYSQL_DATABASE:-testdb}\n'
+	@printf '  \033[33mNote:\033[0m in the UI use host \033[1mengine-mysql\033[0m port \033[1m3306\033[0m user \033[1mroot\033[0m.\n'
+endif
+ifeq ($(MSSQL),1)
+	@printf '  \033[2mEngine SQL Server\033[0m  mssql://sa:$${ENGINE_MSSQL_PASSWORD:-EngineMSSQL_ChangeMe1!}@localhost:14333/master\n'
+	@printf '  \033[33mNote:\033[0m in the UI use host \033[1mengine-mssql\033[0m port \033[1m1433\033[0m user \033[1msa\033[0m database \033[1mmaster\033[0m (or create a DB).\n'
+endif
 	@printf '\nTail logs with \033[1mmake logs\033[0m, stop with \033[1mmake down\033[0m.\n\n'
 
+db-urls:
+	@printf '\n\033[1mTest database connection hints\033[0m\n'
+	@printf '  \033[2mSample source\033[0m    postgres://postgres:$${SAMPLE_SOURCE_PASSWORD:-samplesource}@localhost:5500/source\n'
+	@printf '                   UI: host \033[1msample-source\033[0m port \033[1m5432\033[0m\n'
+	@printf '  \033[2mSample dest\033[0m      postgres://postgres:$${SAMPLE_DEST_PASSWORD:-sampledest}@localhost:5501/dest\n'
+	@printf '                   UI: host \033[1msample-dest\033[0m port \033[1m5432\033[0m\n'
+	@printf '  \033[2mEngine MySQL\033[0m     mysql://root:$${ENGINE_MYSQL_PASSWORD:-EngineMySQL_ChangeMe!}@localhost:3307/$${ENGINE_MYSQL_DATABASE:-testdb}\n'
+	@printf '                   UI: host \033[1mengine-mysql\033[0m port \033[1m3306\033[0m user \033[1mroot\033[0m\n'
+	@printf '  \033[2mEngine SQL Server\033[0m  mssql://sa:$${ENGINE_MSSQL_PASSWORD:-EngineMSSQL_ChangeMe1!}@localhost:14333/master\n'
+	@printf '                   UI: host \033[1mengine-mssql\033[0m port \033[1m1433\033[0m user \033[1msa\033[0m\n'
+	@printf '\n'
+
 down:
-	$(COMPOSE_SAMPLES) down
+	$(COMPOSE_ALL) down
 
 logs:
 	$(COMPOSE) logs -f --tail=100
@@ -98,7 +162,7 @@ fmt:
 	$(COMPOSE) run --rm backend ruff format .
 
 clean:
-	$(COMPOSE_SAMPLES) down -v
+	$(COMPOSE_ALL) down -v
 
 # --- Release / deploy helpers ---
 
@@ -162,12 +226,15 @@ deploy-down:
 .env.deploy: .env.deploy.example
 	@cp .env.deploy.example .env.deploy
 	@KEY=$$(openssl rand -base64 32 | tr '+/' '-_'); \
+	  DBPASS=$$(openssl rand -hex 24); \
 	  if [ "$$(uname)" = "Darwin" ]; then \
 	    sed -i '' "s|^ENCRYPTION_KEY=.*|ENCRYPTION_KEY=$$KEY|" .env.deploy; \
+	    sed -i '' "s|^APP_DB_PASSWORD=.*|APP_DB_PASSWORD=$$DBPASS|" .env.deploy; \
 	  else \
 	    sed -i "s|^ENCRYPTION_KEY=.*|ENCRYPTION_KEY=$$KEY|" .env.deploy; \
+	    sed -i "s|^APP_DB_PASSWORD=.*|APP_DB_PASSWORD=$$DBPASS|" .env.deploy; \
 	  fi
-	@echo "Created .env.deploy with a fresh ENCRYPTION_KEY."
+	@echo "Created .env.deploy with a fresh ENCRYPTION_KEY and strong APP_DB_PASSWORD."
 
 # Build the prod images locally from the current source tree (skips GHCR). Tags them as
 # :dev so deploy-up picks them up via DATAMETL_VERSION=dev.

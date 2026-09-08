@@ -52,6 +52,27 @@ _DEFAULT_DEST_NATIVE: dict[tuple[str, NormalizedType], str] = {
     ("mysql", "enum"): "TEXT",
     ("mysql", "geometry"): "GEOMETRY",
     ("mysql", "unknown"): "TEXT",
+    # SQL Server destination defaults (connect + introspect/compare; cross-engine migrate TBD).
+    ("mssql", "string"): "NVARCHAR(MAX)",
+    ("mssql", "int16"): "SMALLINT",
+    ("mssql", "int32"): "INT",
+    ("mssql", "int64"): "BIGINT",
+    ("mssql", "float32"): "REAL",
+    ("mssql", "float64"): "FLOAT",
+    ("mssql", "decimal"): "DECIMAL(18,6)",
+    ("mssql", "boolean"): "BIT",
+    ("mssql", "uuid"): "UNIQUEIDENTIFIER",
+    ("mssql", "json"): "NVARCHAR(MAX)",
+    ("mssql", "binary"): "VARBINARY(MAX)",
+    ("mssql", "date"): "DATE",
+    ("mssql", "time"): "TIME",
+    ("mssql", "timestamp"): "DATETIME2",
+    ("mssql", "timestamptz"): "DATETIMEOFFSET",
+    ("mssql", "interval"): "NVARCHAR(64)",
+    ("mssql", "array"): "NVARCHAR(MAX)",
+    ("mssql", "enum"): "NVARCHAR(255)",
+    ("mssql", "geometry"): "GEOMETRY",
+    ("mssql", "unknown"): "NVARCHAR(MAX)",
 }
 
 

@@ -65,6 +65,15 @@ services:
       # same-origin. CORS is configured permissively for the localhost origins anyway, in
       # case someone wants direct API access.
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000,http://localhost}
+      # In-app login (optional). Prefer edge SSO in k8s; enable AUTH only without IAP.
+      AUTH_ENABLED: ${AUTH_ENABLED:-false}
+      AUTH_USERNAME: ${AUTH_USERNAME:-admin}
+      AUTH_PASSWORD: ${AUTH_PASSWORD:-}
+      AUTH_TOKEN_TTL_HOURS: ${AUTH_TOKEN_TTL_HOURS:-168}
+      METRICS_ENABLED: ${METRICS_ENABLED:-true}
+      METRICS_TOKEN: ${METRICS_TOKEN:-}
+      # OpenAPI UI — off by default in deploy; set DOCS_ENABLED=true to expose /docs.
+      DOCS_ENABLED: ${DOCS_ENABLED:-false}
     # No --reload in production. The image's default CMD has it (for dev convenience);
     # override here.
     command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

@@ -35,7 +35,7 @@ NormalizedType = Literal[
     "unknown",
 ]
 
-Engine = Literal["postgres", "mysql"]
+Engine = Literal["postgres", "mysql", "mssql"]
 
 
 class ForeignKeyRef(BaseModel):

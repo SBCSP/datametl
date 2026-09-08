@@ -5,8 +5,9 @@
 
 FROM node:20-alpine AS deps
 WORKDIR /app
-COPY package.json package-lock.json* ./
-RUN npm install
+COPY package.json package-lock.json ./
+# package-lock.json required — reproducible install (fail closed).
+RUN npm ci
 
 
 # --- dev: bind-mount source + npm run dev ---

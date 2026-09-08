@@ -58,19 +58,32 @@ The deploy compose only exposes one host port (`FRONTEND_PORT`, default 3000). T
 
 ```bash
 git clone https://github.com/sbcsp/datametl.git && cd datametl
-cp .env.example .env
-make key                      # generate a Fernet key, paste into ENCRYPTION_KEY in .env
+make ensure-env               # creates .env from example + fresh ENCRYPTION_KEY
+# optional: set AUTH_ENABLED=true (and username/password) in .env
 
-make up-samples               # app + sample source & destination Postgres databases
-make migrate                  # run alembic
+make up-samples               # builds, starts, and runs migrations
 ```
+
+`make up` / `make up-samples` always load `.env` via `scripts/dev-compose.sh` so values like `AUTH_*` win even if your shell has stale exports. Prefer Makefile targets over raw `docker compose`.
 
 Then open:
 
-- Frontend: <http://localhost:3000>
-- Backend OpenAPI: <http://localhost:8000/docs>
+- Frontend: <http://localhost:3005>
+- Backend OpenAPI: <http://localhost:8001/docs>
+- API health: <http://localhost:8001/health>
 
 Sample DB credentials are in `.env.example` (`SAMPLE_SOURCE_PASSWORD`, `SAMPLE_DEST_PASSWORD`). Connect to them from the UI as your "source" and "destination" connections.
+
+Optional MySQL / SQL Server test engines (not started by `make up`):
+
+```bash
+make up-mysql      # MySQL 8 on host :3307 — UI host engine-mysql:3306
+make up-mssql      # SQL Server 2022 on host :14333 — UI host engine-mssql:1433
+make up-engines    # both
+make db-urls       # print connection hints (compose hostnames for the UI)
+```
+
+Passwords: `ENGINE_MYSQL_PASSWORD`, `ENGINE_MSSQL_PASSWORD` in `.env.example`. Engine id for SQL Server in the app is `mssql`.
 
 ## Common commands
 
@@ -79,8 +92,11 @@ Run `make help` for the full list. Highlights:
 | Task | Command |
 |---|---|
 | Generate a Fernet key | `make key` |
-| Start dev stack (always rebuilds) | `make up` |
+| Create/validate `.env` | `make ensure-env` |
+| Start dev stack (build + migrate) | `make up` |
 | With sample DBs | `make up-samples` |
+| MySQL / SQL Server test engines | `make up-mysql` / `make up-mssql` / `make up-engines` |
+| Print DB connection hints | `make db-urls` |
 | Apply migrations | `make migrate` |
 | Tail logs | `make logs` |
 | Run backend tests | `make test` |
@@ -100,6 +116,14 @@ That tags `v0.2.1`, pushes the tag, and the `.github/workflows/release.yml` work
 3. Stages the deploy compose with version pinned and attaches it to the GitHub release alongside `install.sh`
 
 End users then run the one-liner above and pull the freshly-published images.
+
+## Deploy security notes
+
+- **Sit behind SSO** (oauth2-proxy / Keycloak / similar) **or** set `AUTH_ENABLED=true` with a strong `AUTH_PASSWORD` before exposing the UI.
+- `install.sh` / `make deploy-up` generate a Fernet `ENCRYPTION_KEY` and a strong `APP_DB_PASSWORD` — never commit `.env` / `.env.deploy`.
+- Empty or `CHANGE_ME` encryption keys are refused at startup.
+- Deploy compose disables OpenAPI `/docs` by default (`DOCS_ENABLED=false`). Set `DOCS_ENABLED=true` only on trusted networks.
+- Protect `/metrics` with `METRICS_TOKEN` when the scrape endpoint is reachable beyond a trusted network.
 
 ## Architecture
 
