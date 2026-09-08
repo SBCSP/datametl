@@ -332,7 +332,7 @@ export default function SettingsPage() {
               <p className="text-xs text-muted-foreground pt-2 border-t">
                 <strong>Community</strong> (no key): Postgres migrate/introspect/compare/verify;
                 Mel allowed with tool approval forced to <code className="font-mono">always</code>.{" "}
-                <strong>Pro</strong>: full Mel approval modes + MySQL/SQL Server connectors.
+                <strong>Pro</strong>: full Mel approval modes + MySQL/SQL Server + external FastMCP (<code className="font-mono">/mcp/external</code>).
                 Keys are offline-verifiable (Ed25519) and stored encrypted like the Anthropic key.
                 Purchase via <strong>Buy Pro</strong> (Stripe Payment Link) when configured, or paste
                 a signed key from your issuer.
@@ -369,6 +369,20 @@ export default function SettingsPage() {
                 <p className="text-xs text-amber-700 dark:text-amber-400">
                   Community: Mel tool approval is fixed to <strong>always</strong>. Activate Pro
                   to choose run_sql-only or auto.
+                </p>
+              )}
+              {data.license && !data.license.allows_external_mcp && (
+                <p className="text-xs text-amber-700 dark:text-amber-400">
+                  Community: external FastMCP (<code className="font-mono">/mcp/external</code>) is
+                  Pro-only (HTTP 402). In-app Mel remains available.
+                </p>
+              )}
+              {data.license?.allows_external_mcp && (
+                <p className="text-xs text-muted-foreground">
+                  External FastMCP is enabled at{" "}
+                  <code className="font-mono">/mcp/external</code> (stdio:{" "}
+                  <code className="font-mono">python -m app.mcp</code>). Same approve-to-run +
+                  audit as Mel; resolve pending tools via chat Approve/Deny.
                 </p>
               )}
               <p className="text-xs text-muted-foreground pt-2 border-t">

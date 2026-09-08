@@ -1,7 +1,7 @@
 """Read-only database tools bound to the active MCP connection.
 
 The same three tools are surfaced two ways: to Mel (in-app chat, via Anthropic tool use) and to
-external MCP clients (FastMCP server). All execution goes through the connector's read-only path
+external MCP clients (Pro-gated FastMCP at `/mcp/external` / `python -m app.mcp`). All execution goes through the connector's read-only path
 (`run_statements(read_only=True)`), so it inherits the read-only transaction, row cap, and
 statement timeout — writes/DDL are rejected.
 """

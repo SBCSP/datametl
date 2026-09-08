@@ -43,3 +43,12 @@ def require_mel_approval_choice(db: Session, mode: str) -> None:
     if mode == "always":
         return
     raise HTTPException(LICENSE_HTTP_STATUS, COMMUNITY_MEL_LIMIT)
+
+
+EXTERNAL_MCP_FEATURE = "External MCP (FastMCP)"
+
+
+def require_external_mcp(db: Session) -> None:
+    """Community may use in-app Mel; external FastMCP is Pro-only."""
+    require_pro(db, feature=EXTERNAL_MCP_FEATURE)
+

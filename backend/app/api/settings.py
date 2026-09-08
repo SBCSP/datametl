@@ -65,6 +65,7 @@ def _license_status(db: Session) -> LicenseStatus:
         community_mel_limit=COMMUNITY_MEL_LIMIT,
         can_use_mysql_mssql=ents.is_pro,
         can_choose_mel_approval=ents.can_choose_mel_approval(),
+        allows_external_mcp=ents.allows_external_mcp(),
         license_key_set=has_license_key(db),
     )
 

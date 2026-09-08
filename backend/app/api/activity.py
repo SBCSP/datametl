@@ -240,11 +240,12 @@ def list_activity(
         detail_bits = [m.decision, m.args_summary]
         if m.outcome_detail:
             detail_bits.append(m.outcome_detail)
+        source = "FastMCP" if (m.model or "") == "fastmcp" else "Mel"
         out.append(
             ActivityEntry(
                 type="mel_tool",
                 id=str(m.id),
-                label=f"Mel: {m.tool_name}" + (f" @ {m.connection_name}" if m.connection_name else ""),
+                label=f"{source}: {m.tool_name}" + (f" @ {m.connection_name}" if m.connection_name else ""),
                 status=status,
                 started_at=m.created_at,
                 finished_at=m.finished_at,

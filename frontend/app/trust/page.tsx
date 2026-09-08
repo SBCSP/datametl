@@ -200,6 +200,13 @@ export default function TrustPage() {
                   </td>
                 </tr>
                 <tr className="border-b">
+                  <td className="py-2 pr-4 text-foreground">
+                    External FastMCP (<code className="font-mono text-xs">/mcp/external</code>)
+                  </td>
+                  <td className="py-2 pr-4">No (HTTP 402)</td>
+                  <td className="py-2">Yes — same approve-to-run + audit</td>
+                </tr>
+                <tr className="border-b">
                   <td className="py-2 pr-4 text-foreground">MySQL + SQL Server connectors</td>
                   <td className="py-2 pr-4">No</td>
                   <td className="py-2">Yes</td>

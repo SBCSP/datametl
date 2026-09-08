@@ -53,6 +53,10 @@ Every Mel tool proposal is recorded (`mel_tool_invocations`) with redacted args,
 - **Stripe secrets** (`STRIPE_SECRET_KEY`, webhook secret, `LICENSE_SIGNING_KEY`) belong only on a **vendor issuer** machine (Phase 2 webhook). Normal Community / Pro installs paste a key in Settings — they do **not** need Stripe.
 - **Team** is an entitlement stub only; multi-user SSO/RBAC is **not** shipped in-app (Helm can put oauth2-proxy/Keycloak at the edge separately).
 
+### External FastMCP (Pro)
+
+Cursor / Claude Desktop can connect to DataMETL’s FastMCP endpoint at `/mcp/external` (or stdio via `python -m app.mcp`). **Pro only** — Community receives HTTP 402. Tools stay read-only, use the same Mel approval mode, Redis Approve/Deny waiters, and `mel_tool_invocations` audit rows (`model=fastmcp`). Pending proposals are resolved with `POST /api/chat/tool-decision`.
+
 ## Community vs Pro
 
 | | Community | Pro |
@@ -60,6 +64,7 @@ Every Mel tool proposal is recorded (`mel_tool_invocations`) with redacted args,
 | Postgres migrate / introspect / compare / verify | Yes | Yes |
 | Mel chat | Yes | Yes |
 | Mel tool approval modes | Forced `always` | `run_sql_only` / `always` / `auto` |
+| External FastMCP (`/mcp/external`) | Not available (HTTP 402) | Same approve-to-run + audit as Mel |
 | MySQL + SQL Server connectors | No | Yes |
 | License key | None | Signed `dmtl1.…` (Ed25519) |
 | Stripe on your install | Not required | Not required |

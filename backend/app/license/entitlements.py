@@ -70,6 +70,10 @@ class Entitlements:
     def can_choose_mel_approval(self) -> bool:
         return self.is_pro
 
+    def allows_external_mcp(self) -> bool:
+        """External FastMCP (Cursor/Claude Desktop) is Pro-only; Mel in-app stays Community."""
+        return self.is_pro
+
 
 def _community(message: str | None = None) -> Entitlements:
     return Entitlements(

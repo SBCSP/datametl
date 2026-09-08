@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -33,12 +35,23 @@ from app.api import (
     settings as settings_api,
 )
 from app.config import settings
+from app.mcp.server import create_http_app as create_external_mcp_app
 
 logging.basicConfig(level=settings.log_level)
 
 _docs = "/docs" if settings.docs_enabled else None
 _redoc = "/redoc" if settings.docs_enabled else None
 _openapi = "/openapi.json" if settings.docs_enabled else None
+
+# Pro-gated FastMCP (streamable HTTP). Lifespan must be wired into FastAPI.
+_external_mcp_app = create_external_mcp_app()
+
+
+@asynccontextmanager
+async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    async with _external_mcp_app.lifespan(_external_mcp_app):
+        yield
+
 
 app = FastAPI(
     title="DataMETL",
@@ -47,6 +60,7 @@ app = FastAPI(
     docs_url=_docs,
     redoc_url=_redoc,
     openapi_url=_openapi,
+    lifespan=_lifespan,
 )
 
 # Endpoints reachable without a bearer token (only consulted when AUTH_ENABLED).
@@ -54,7 +68,7 @@ _AUTH_OPEN_EXACT = {"/health", "/api/auth/login", "/api/auth/status", "/api/bill
 
 
 class AuthMiddleware(BaseHTTPMiddleware):
-    """Require a valid bearer token for /api/* when AUTH_ENABLED. No-op when disabled.
+    """Require a valid bearer token for /api/* (and /mcp/*) when AUTH_ENABLED. No-op when disabled.
 
     Added *before* CORS so CORS stays the outermost middleware — 401s still get CORS headers,
     and preflight OPTIONS is handled by CORS before reaching here."""
@@ -65,7 +79,8 @@ class AuthMiddleware(BaseHTTPMiddleware):
         path = request.url.path
         if request.method == "OPTIONS" or path in _AUTH_OPEN_EXACT or (settings.docs_enabled and path.startswith("/docs")):
             return await call_next(request)
-        if path.startswith("/api/"):
+        # /api/* and external FastMCP mount share the same optional in-app auth gate.
+        if path.startswith("/api/") or path.startswith("/mcp/"):
             header = request.headers.get("authorization", "")
             token = header[7:].strip() if header.lower().startswith("bearer ") else ""
             if auth_lib.verify_token(token) is None:
@@ -102,6 +117,9 @@ app.include_router(prometheus.router)
 app.include_router(settings_api.router)
 app.include_router(billing.router)
 app.include_router(jobs.router)
+
+# External FastMCP — Pro middleware lives on the sub-app; Community → 402.
+app.mount("/mcp/external", _external_mcp_app)
 
 
 @app.get("/health", tags=["meta"])

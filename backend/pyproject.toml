@@ -23,6 +23,7 @@ dependencies = [
     "croniter>=2.0",
     "httpx>=0.28",
     "stripe>=15.6.1",
+    "fastmcp>=4.0.3",
 ]
 
 [dependency-groups]
@@ -56,7 +57,7 @@ plugins = ["pydantic.mypy"]
 exclude = ["alembic/"]
 
 [[tool.mypy.overrides]]
-module = ["arq.*", "croniter.*", "stripe.*"]
+module = ["arq.*", "croniter.*", "stripe.*", "fastmcp.*", "mcp.*", "mcp_types.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
