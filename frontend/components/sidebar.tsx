@@ -28,6 +28,7 @@ import { Badge } from "@/components/ui/badge";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { HealthDot } from "@/components/health-dot";
 import { ActivityIndicator } from "@/components/activity-indicator";
+import { WorkspaceChip } from "@/components/workspace-chip";
 
 type NavItem = {
   href: string;
@@ -110,6 +111,8 @@ export function Sidebar() {
           </span>
         </div>
       </div>
+
+      <WorkspaceChip />
 
       <nav className="flex-1 overflow-y-auto px-2 py-3 space-y-4">
         {NAV.map((group) => (
