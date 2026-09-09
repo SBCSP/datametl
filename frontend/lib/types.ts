@@ -404,6 +404,10 @@ export interface AuthStatus {
   auth_enabled: boolean;
   authenticated: boolean;
   username: string | null;
+  /** True when AUTH_ENABLED and GITHUB_OAUTH_* are all set. */
+  github_oauth_enabled?: boolean;
+  /** True when AUTH_ENABLED and AUTH_LEGACY_BASIC. */
+  legacy_basic_enabled?: boolean;
 }
 export interface LoginResponse {
   token: string;

@@ -5,14 +5,14 @@
 - Team-on-install (not cloud SaaS)
 - Schema-per-tenant: `public` control plane + one Postgres schema per tenant
 - Schema naming: **`tenant_<uuid>`** → implemented as `tenant_` + `uuid.hex` (32 lowercase hex chars, no dashes), e.g. `tenant_00000000000040008000000000000001`
-- Personal GitHub OAuth v1 (interfaces stubbed here; full OAuth = next milestone)
+- Personal GitHub OAuth v1 — see [GITHUB_OAUTH.md](./GITHUB_OAUTH.md)
 - Pro licenses are **tenant-scoped** (`tenant_licenses` stub)
 - **No cross-tenant Mel**
 
 **Milestone order (locked)**
 
 1. **TENANT-SCHEMA** (this PR) — control models, provision, search_path, cutover, dual migration docs
-2. **GITHUB-OAUTH** — personal GitHub OAuth (Knox for secrets)
+2. **GITHUB-OAUTH** — personal GitHub OAuth ([GITHUB_OAUTH.md](./GITHUB_OAUTH.md); Knox for secrets)
 3. **TENANT-ENFORCE** — bind every request/job to a tenant schema; reject cross-tenant Mel
 4. **Staging smoke** — provision + cutover + OAuth login on Railway staging
 
@@ -102,6 +102,6 @@ Env `AUTH_LEGACY_BASIC` (default `true`): keep the existing username/password lo
 
 ## Out of scope (follow-ups)
 
-- Full GitHub OAuth UI/callback (see `app.tenancy.oauth` stubs)
+- Full GitHub OAuth login UI polish (backend start/callback shipped — see GITHUB_OAUTH.md)
 - Rewriting every API route to bind tenant
 - Moving all alembic history into a separate tenant track in one rewrite

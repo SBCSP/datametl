@@ -1,7 +1,7 @@
 """Schema-per-tenant foundation (team-on-install).
 
 Milestone order (locked):
-  1. TENANT-SCHEMA (this package) → 2. GITHUB-OAUTH personal → 3. TENANT-ENFORCE → 4. staging smoke
+  1. TENANT-SCHEMA (this package) → 2. GITHUB-OAUTH personal (see app.tenancy.oauth) → 3. TENANT-ENFORCE → 4. staging smoke
 
 Schema names are always ``tenant_<uuidhex>`` (UUID.hex, 32 lowercase hex chars).
 """

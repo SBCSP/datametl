@@ -64,7 +64,14 @@ app = FastAPI(
 )
 
 # Endpoints reachable without a bearer token (only consulted when AUTH_ENABLED).
-_AUTH_OPEN_EXACT = {"/health", "/api/auth/login", "/api/auth/status", "/api/billing/stripe/webhook"} | ({"/openapi.json"} if settings.docs_enabled else set())
+_AUTH_OPEN_EXACT = {
+    "/health",
+    "/api/auth/login",
+    "/api/auth/status",
+    "/api/auth/github/start",
+    "/api/auth/github/callback",
+    "/api/billing/stripe/webhook",
+} | ({"/openapi.json"} if settings.docs_enabled else set())
 
 
 class AuthMiddleware(BaseHTTPMiddleware):

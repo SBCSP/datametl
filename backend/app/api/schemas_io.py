@@ -426,6 +426,8 @@ class AuthStatus(BaseModel):
     auth_enabled: bool
     authenticated: bool
     username: str | None = None
+    github_oauth_enabled: bool = False
+    legacy_basic_enabled: bool = True
 
 
 class ChangePasswordRequest(BaseModel):
