@@ -29,6 +29,8 @@ class Tenant(Base):
     # personal | org
     kind: Mapped[str] = mapped_column(String(16), nullable=False)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
+    # URL-safe unique slug (lowercase [a-z0-9-]); set at onboard / provision.
+    slug: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
     # Canonical: tenant_ + uuid.hex (32 lowercase hex chars, no dashes).
     schema_name: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
     created_at: Mapped[datetime] = mapped_column(

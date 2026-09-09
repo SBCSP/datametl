@@ -12,6 +12,9 @@ import type {
   ActivityEntry,
   AuthStatus,
   LoginResponse,
+  TenantsMeResponse,
+  TenantCreatePayload,
+  TenantSummary,
   Metrics,
   AppSettings,
   LicenseStatus,
@@ -302,6 +305,14 @@ export const api = {
     request<void>("/api/auth/change-password", {
       method: "POST",
       body: JSON.stringify({ current_password, new_password }),
+    }),
+
+  // Tenants / onboarding
+  tenantsMe: () => request<TenantsMeResponse>("/api/tenants/me"),
+  createTenant: (body: TenantCreatePayload) =>
+    request<TenantSummary>("/api/tenants", {
+      method: "POST",
+      body: JSON.stringify(body),
     }),
 
   // Settings

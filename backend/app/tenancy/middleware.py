@@ -47,6 +47,9 @@ def _should_skip(request: Request) -> bool:
         return True
     if path in _SKIP_EXACT:
         return True
+    # Onboard routes need auth but must work with zero memberships (no tenant bind).
+    if path == "/api/tenants" or path.startswith("/api/tenants/"):
+        return True
     if path == "/openapi.json":
         return True
     return path.startswith("/docs") or path.startswith("/redoc")

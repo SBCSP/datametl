@@ -6,6 +6,7 @@ import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { Sidebar } from "@/components/sidebar";
 import { McpBanner } from "@/components/mcp-banner";
+import { OnboardingModal } from "@/components/onboarding-modal";
 import { useActivityNotifications } from "@/lib/use-activity-notifications";
 
 /** Decides whether to render the sidebar + padded main, or a bare canvas (for printable
@@ -27,13 +28,28 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     staleTime: 30_000,
   });
   const needsLogin = !!authStatus.data?.auth_enabled && !authStatus.data.authenticated;
+  const checkOnboarding =
+    !!authStatus.data?.auth_enabled &&
+    !!authStatus.data.authenticated &&
+    !needsLogin &&
+    !isLogin;
+
+  // Onboard gate: zero memberships → block UI even if cutover tenant is bound.
+  const tenantsMe = useQuery({
+    queryKey: ["tenants-me"],
+    queryFn: api.tenantsMe,
+    enabled: checkOnboarding,
+    retry: false,
+    staleTime: 15_000,
+  });
+  const needsOnboarding = checkOnboarding && tenantsMe.data?.needs_onboarding === true;
 
   useEffect(() => {
     if (needsLogin && !isLogin) router.replace("/login");
   }, [needsLogin, isLogin, router]);
 
-  // Don't poll protected endpoints on the login screen / when unauthenticated.
-  useActivityNotifications({ enabled: !needsLogin && !isLogin });
+  // Don't poll protected endpoints on the login screen / when unauthenticated / onboard.
+  useActivityNotifications({ enabled: !needsLogin && !isLogin && !needsOnboarding });
 
   // The login page renders standalone (no sidebar).
   if (isLogin) {
@@ -44,6 +60,28 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <div className="flex min-h-dvh items-center justify-center text-sm text-muted-foreground">
         Redirecting to sign in…
       </div>
+    );
+  }
+
+  if (checkOnboarding && tenantsMe.isLoading && tenantsMe.data === undefined) {
+    return (
+      <div className="flex min-h-dvh items-center justify-center text-sm text-muted-foreground">
+        Loading workspace…
+      </div>
+    );
+  }
+
+  if (needsOnboarding) {
+    return (
+      <>
+        <div className="pointer-events-none select-none opacity-40" aria-hidden>
+          <Sidebar />
+          <div className="md:pl-60">
+            <main className="mx-auto max-w-7xl px-6 py-8" />
+          </div>
+        </div>
+        <OnboardingModal />
+      </>
     );
   }
 

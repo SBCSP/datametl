@@ -821,3 +821,30 @@ export interface PipelineRunEnqueued {
   run_id: string;
   job_id: string;
 }
+
+
+// --- Tenant onboard (TENANT-ONBOARD-v1) ---
+
+export type TenantKind = "personal" | "organization";
+
+export interface TenantSummary {
+  id: string;
+  name: string;
+  slug: string;
+  kind: TenantKind;
+  role: string | null;
+  schema_name: string;
+  created_at?: string | null;
+}
+
+export interface TenantsMeResponse {
+  /** True when the authenticated user has zero TenantMembership rows. */
+  needs_onboarding: boolean;
+  tenants: TenantSummary[];
+}
+
+export interface TenantCreatePayload {
+  name: string;
+  slug: string;
+  kind: TenantKind;
+}
