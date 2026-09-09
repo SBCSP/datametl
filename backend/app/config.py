@@ -26,6 +26,12 @@ class Settings(BaseSettings):
     # Default True when AUTH_ENABLED; deprecate after GITHUB-OAUTH + TENANT-ENFORCE.
     auth_legacy_basic: bool = Field(True, alias="AUTH_LEGACY_BASIC")
 
+    # Personal GitHub OAuth v1 (GITHUB-OAUTH). Empty → feature disabled / clear errors.
+    # Never commit real client secrets; use Knox / deploy secrets for production.
+    github_oauth_client_id: str = Field("", alias="GITHUB_OAUTH_CLIENT_ID")
+    github_oauth_client_secret: str = Field("", alias="GITHUB_OAUTH_CLIENT_SECRET")
+    github_oauth_redirect_uri: str = Field("", alias="GITHUB_OAUTH_REDIRECT_URI")
+
     # Prometheus scrape endpoint at /metrics (outside /api, so not gated by AUTH_ENABLED).
     # Set METRICS_TOKEN to require `Authorization: Bearer <token>` from the scraper.
     metrics_enabled: bool = Field(True, alias="METRICS_ENABLED")

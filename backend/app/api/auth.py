@@ -1,12 +1,22 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Header, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
+from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 
 from app import auth
 from app.api.schemas_io import AuthStatus, ChangePasswordRequest, LoginRequest, LoginResponse
 from app.config import settings
 from app.db import get_db
+from app.tenancy.oauth import (
+    GitHubOAuthError,
+    GitHubOAuthProvider,
+    github_oauth_configured,
+    issue_oauth_state,
+    link_oauth_identity,
+    session_username_for_user,
+    verify_oauth_state,
+)
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -24,7 +34,8 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)) -> LoginResponse
     if not settings.auth_legacy_basic:
         raise HTTPException(
             400,
-            "AUTH_LEGACY_BASIC is disabled; use GitHub OAuth (GITHUB-OAUTH milestone).",
+            "AUTH_LEGACY_BASIC is disabled; use GitHub OAuth "
+            "(GET /api/auth/github/start).",
         )
     if not auth.verify_login(db, payload.username, payload.password):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid username or password.")
@@ -37,10 +48,24 @@ def auth_status(
     db: Session = Depends(get_db), authorization: str | None = Header(default=None)
 ) -> AuthStatus:
     """Public — the frontend gate uses this before login to decide whether to redirect."""
+    oauth_on = bool(settings.auth_enabled and github_oauth_configured())
+    legacy_on = bool(settings.auth_enabled and settings.auth_legacy_basic)
     if not settings.auth_enabled:
-        return AuthStatus(auth_enabled=False, authenticated=True, username=None)
+        return AuthStatus(
+            auth_enabled=False,
+            authenticated=True,
+            username=None,
+            github_oauth_enabled=False,
+            legacy_basic_enabled=False,
+        )
     user = auth.verify_token(_bearer(authorization) or "")
-    return AuthStatus(auth_enabled=True, authenticated=user is not None, username=user)
+    return AuthStatus(
+        auth_enabled=True,
+        authenticated=user is not None,
+        username=user,
+        github_oauth_enabled=oauth_on,
+        legacy_basic_enabled=legacy_on,
+    )
 
 
 @router.post("/change-password", status_code=status.HTTP_204_NO_CONTENT)
@@ -57,3 +82,68 @@ def change_password(
     if not auth.verify_login(db, user, payload.current_password):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Current password is incorrect.")
     auth.set_password(db, payload.new_password)
+
+
+@router.get("/github/start", response_model=None)
+def github_oauth_start(
+    as_json: bool = Query(
+        False,
+        alias="json",
+        description="If true, return authorize_url JSON instead of 302.",
+    ),
+) -> RedirectResponse | dict[str, str]:  # response_model=None (union of Response/dict)
+    """Begin personal GitHub OAuth — 302 to GitHub, or JSON ``authorize_url`` when ``json=1``."""
+    if not settings.auth_enabled:
+        raise HTTPException(400, "Authentication is disabled.")
+    provider = GitHubOAuthProvider()
+    if not provider.is_configured():
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "GitHub OAuth is not configured. Set GITHUB_OAUTH_CLIENT_ID, "
+            "GITHUB_OAUTH_CLIENT_SECRET, and GITHUB_OAUTH_REDIRECT_URI.",
+        )
+    state = issue_oauth_state(provider="github")
+    try:
+        url = provider.authorize_url(state, provider.config.redirect_uri)
+    except GitHubOAuthError as exc:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
+    if as_json:
+        return {"authorize_url": url, "state": state}
+    return RedirectResponse(url=url, status_code=status.HTTP_302_FOUND)
+
+
+@router.get("/github/callback", response_model=LoginResponse)
+def github_oauth_callback(
+    code: str | None = None,
+    state: str | None = None,
+    error: str | None = None,
+    error_description: str | None = None,
+    db: Session = Depends(get_db),
+) -> LoginResponse:
+    """Exchange GitHub code, link ``OAuthIdentity``, issue the same bearer session as login."""
+    if not settings.auth_enabled:
+        raise HTTPException(400, "Authentication is disabled.")
+    if error:
+        detail = error_description or error
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"GitHub OAuth error: {detail}")
+    if not code or not state:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Missing code or state.")
+    if not verify_oauth_state(state, provider="github"):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid or expired OAuth state.")
+
+    provider = GitHubOAuthProvider()
+    if not provider.is_configured():
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "GitHub OAuth is not configured. Set GITHUB_OAUTH_CLIENT_ID, "
+            "GITHUB_OAUTH_CLIENT_SECRET, and GITHUB_OAUTH_REDIRECT_URI.",
+        )
+    try:
+        info = provider.exchange_code(code, provider.config.redirect_uri)
+    except GitHubOAuthError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+
+    user = link_oauth_identity(db, info)
+    username = session_username_for_user(user, info)
+    token, exp = auth.issue_token(username)
+    return LoginResponse(token=token, username=username, expires_at=exp)
