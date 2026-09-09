@@ -21,6 +21,11 @@ def _bearer(authorization: str | None) -> str | None:
 def login(payload: LoginRequest, db: Session = Depends(get_db)) -> LoginResponse:
     if not settings.auth_enabled:
         raise HTTPException(400, "Authentication is disabled.")
+    if not settings.auth_legacy_basic:
+        raise HTTPException(
+            400,
+            "AUTH_LEGACY_BASIC is disabled; use GitHub OAuth (GITHUB-OAUTH milestone).",
+        )
     if not auth.verify_login(db, payload.username, payload.password):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid username or password.")
     token, exp = auth.issue_token(payload.username)

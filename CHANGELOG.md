@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Schema-per-tenant foundation (**TENANT-SCHEMA**): public control models (`tenants`, `users`, `oauth_identities`, `tenant_memberships`, `tenant_licenses`), `app.tenancy` provision + `set_search_path`, tenant template runner, `python -m app.scripts.cutover_tenant_schema` (SET SCHEMA), `AUTH_LEGACY_BASIC` escape hatch. Schema names locked to `tenant_<uuidhex>`.
 - In-app **Trust** page at `/trust` (sidebar + Settings links) and `docs/TRUST.md` / `docs/LAUNCH.md` launch copy.
 - Product pitch polish at the top of the README (Mel, migrate, local-first, install one-liner, Buy Pro).
 
