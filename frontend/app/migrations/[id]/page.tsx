@@ -129,12 +129,12 @@ function MigrationRunBody({ params }: { params: Promise<{ id: string }> }) {
           { label: r.id.slice(0, 8) + "…" },
         ]}
         actions={
-          <Button asChild variant="outline">
+          <>
+            <Button asChild variant="outline">
               <Link href={askMelAboutMigration(`Migration ${id.slice(0, 8)}…`)}>
                 <Bot className="h-4 w-4" /> Ask Mel
               </Link>
             </Button>
-            <>
             <Button asChild variant="outline">
               <Link href={`/comparisons/${r.comparison_id}`}>Open comparison</Link>
             </Button>
