@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
+from urllib.parse import urlencode
+
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
 from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 
@@ -112,15 +114,32 @@ def github_oauth_start(
     return RedirectResponse(url=url, status_code=status.HTTP_302_FOUND)
 
 
-@router.get("/github/callback", response_model=LoginResponse)
+def _prefer_html_oauth_landing(request: Request) -> bool:
+    """Browsers send text/html; API clients / tests typically send application/json or */*."""
+    accept = (request.headers.get("accept") or "").lower()
+    if "text/html" not in accept:
+        return False
+    html_pos = accept.find("text/html")
+    json_pos = accept.find("application/json")
+    if json_pos == -1:
+        return True
+    return html_pos < json_pos
+
+
+@router.get("/github/callback", response_model=None)
 def github_oauth_callback(
+    request: Request,
     code: str | None = None,
     state: str | None = None,
     error: str | None = None,
     error_description: str | None = None,
     db: Session = Depends(get_db),
-) -> LoginResponse:
-    """Exchange GitHub code, link ``OAuthIdentity``, issue the same bearer session as login."""
+) -> LoginResponse | RedirectResponse:
+    """Exchange GitHub code, link ``OAuthIdentity``, issue the same bearer session as login.
+
+    Browser navigations (Accept includes text/html) 302 to ``/login#…`` so the FE can
+    ``setToken``; API clients that prefer ``application/json`` still get ``LoginResponse``.
+    """
     if not settings.auth_enabled:
         raise HTTPException(400, "Authentication is disabled.")
     if error:
@@ -146,4 +165,11 @@ def github_oauth_callback(
     user = link_oauth_identity(db, info)
     username = session_username_for_user(user, info)
     token, exp = auth.issue_token(username)
-    return LoginResponse(token=token, username=username, expires_at=exp)
+    payload = LoginResponse(token=token, username=username, expires_at=exp)
+    if _prefer_html_oauth_landing(request):
+        # Fragment keeps the token out of server/proxy access logs on the FE hop.
+        frag = urlencode(
+            {"token": payload.token, "username": payload.username, "expires_at": str(payload.expires_at)}
+        )
+        return RedirectResponse(url=f"/login#{frag}", status_code=status.HTTP_302_FOUND)
+    return payload
