@@ -37,6 +37,8 @@ from app.api.schemas_io import (
 )
 from app.crypto import vault
 from app.db import get_db
+from app.tenancy.deps import require_tenant_context
+from app.tenancy.middleware import TenantContext
 from app.license.entitlements import get_entitlements
 from app.mcp import audit as mel_audit
 from app.mcp import tools as mcp_tools
@@ -408,7 +410,11 @@ async def _tool_loop_stream(
 
 
 @router.post("/stream")
-async def chat_stream(payload: ChatRequest, db: Session = Depends(get_db)) -> StreamingResponse:
+async def chat_stream(
+    payload: ChatRequest,
+    db: Session = Depends(get_db),
+    _tenant: TenantContext | None = Depends(require_tenant_context),
+) -> StreamingResponse:
     if payload.model not in CHAT_MODELS:
         raise HTTPException(400, f"Unknown model: {payload.model}")
     api_key = get_anthropic_key(db)
@@ -442,7 +448,10 @@ async def chat_stream(payload: ChatRequest, db: Session = Depends(get_db)) -> St
 
 
 @router.post("/tool-decision", response_model=MelToolDecisionResponse)
-async def tool_decision(payload: MelToolDecisionRequest) -> MelToolDecisionResponse:
+async def tool_decision(
+    payload: MelToolDecisionRequest,
+    _tenant: TenantContext | None = Depends(require_tenant_context),
+) -> MelToolDecisionResponse:
     """Approve or deny a pending Mel tool proposal from the chat UI."""
     ok = await resolve_decision(payload.proposal_id, payload.decision)
     if not ok:
@@ -456,6 +465,7 @@ async def tool_decision(payload: MelToolDecisionRequest) -> MelToolDecisionRespo
 def list_mel_audit(
     db: Session = Depends(get_db),
     limit: int = Query(100, ge=1, le=500),
+    _tenant: TenantContext | None = Depends(require_tenant_context),
 ) -> list[MelToolInvocation]:
     """Recent Mel tool invocations (redacted args) for the audit / activity surfaces."""
     rows = list(
@@ -506,7 +516,11 @@ async def _describe_stream(api_key: str, model: str, sql: str) -> AsyncIterator[
 
 
 @router.post("/describe-sql")
-async def describe_sql(payload: DescribeSqlRequest, db: Session = Depends(get_db)) -> StreamingResponse:
+async def describe_sql(
+    payload: DescribeSqlRequest,
+    db: Session = Depends(get_db),
+    _tenant: TenantContext | None = Depends(require_tenant_context),
+) -> StreamingResponse:
     sql = payload.sql.strip()
     if not sql:
         raise HTTPException(400, "No SQL to describe — write the script first.")
@@ -553,7 +567,10 @@ def _to_read(row: ChatSession) -> ChatSessionRead:
 
 
 @router.get("/sessions", response_model=list[ChatSessionSummary])
-def list_sessions(db: Session = Depends(get_db)) -> list[ChatSessionSummary]:
+def list_sessions(
+    db: Session = Depends(get_db),
+    _tenant: TenantContext | None = Depends(require_tenant_context),
+) -> list[ChatSessionSummary]:
     rows = db.execute(select(ChatSession).order_by(ChatSession.updated_at.desc())).scalars()
     return [
         ChatSessionSummary(
@@ -565,7 +582,11 @@ def list_sessions(db: Session = Depends(get_db)) -> list[ChatSessionSummary]:
 
 
 @router.post("/sessions", response_model=ChatSessionRead, status_code=status.HTTP_201_CREATED)
-def create_session(payload: ChatSessionCreate, db: Session = Depends(get_db)) -> ChatSessionRead:
+def create_session(
+    payload: ChatSessionCreate,
+    db: Session = Depends(get_db),
+    _tenant: TenantContext | None = Depends(require_tenant_context),
+) -> ChatSessionRead:
     title = (payload.title or "").strip() or _derive_title(payload.messages)
     row = ChatSession(
         title=title,
@@ -580,7 +601,11 @@ def create_session(payload: ChatSessionCreate, db: Session = Depends(get_db)) ->
 
 
 @router.get("/sessions/{session_id}", response_model=ChatSessionRead)
-def get_session(session_id: uuid.UUID, db: Session = Depends(get_db)) -> ChatSessionRead:
+def get_session(
+    session_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    _tenant: TenantContext | None = Depends(require_tenant_context),
+) -> ChatSessionRead:
     row = db.get(ChatSession, session_id)
     if row is None:
         raise HTTPException(404, "Chat session not found")
@@ -589,7 +614,10 @@ def get_session(session_id: uuid.UUID, db: Session = Depends(get_db)) -> ChatSes
 
 @router.put("/sessions/{session_id}", response_model=ChatSessionRead)
 def update_session(
-    session_id: uuid.UUID, payload: ChatSessionUpdate, db: Session = Depends(get_db)
+    session_id: uuid.UUID,
+    payload: ChatSessionUpdate,
+    db: Session = Depends(get_db),
+    _tenant: TenantContext | None = Depends(require_tenant_context),
 ) -> ChatSessionRead:
     row = db.get(ChatSession, session_id)
     if row is None:
@@ -607,7 +635,11 @@ def update_session(
 
 
 @router.delete("/sessions/{session_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_session(session_id: uuid.UUID, db: Session = Depends(get_db)) -> None:
+def delete_session(
+    session_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    _tenant: TenantContext | None = Depends(require_tenant_context),
+) -> None:
     row = db.get(ChatSession, session_id)
     if row is None:
         raise HTTPException(404, "Chat session not found")

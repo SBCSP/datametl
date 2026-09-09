@@ -69,7 +69,40 @@ Kinds: `personal` | `org`.
 `set_search_path(connection, schema_name)` → `SET search_path TO tenant_…, public`
 so unqualified ORM tables hit the tenant schema while control tables in `public` stay visible.
 
-Full request middleware enforcement is **TENANT-ENFORCE** (`TenantBindingMiddleware` is a no-op stub).
+---
+
+## TENANT-ENFORCE
+
+Env `TENANT_ENFORCE_ENABLED` (default **`true`**): bind every authenticated request and
+background job to a tenant schema. Staging keeps working via the cutover tenant +
+`AUTH_LEGACY_BASIC` fallback.
+
+### Request path
+
+1. `TenantBindingMiddleware` (inside Auth, outside routes) resolves the bearer subject,
+   loads `TenantMembership` rows, and picks the active tenant:
+   - Header `X-Tenant-Id` if the user is a member of that tenant
+   - Else the sole membership, or the earliest membership when several exist
+   - Else, when auth is off or `AUTH_LEGACY_BASIC`, the cutover tenant
+     `00000000-0000-4000-8000-000000000001` →
+     `tenant_00000000000040008000000000000001` (if the control row exists)
+2. Sets `request.state.tenant_context = TenantContext(...)` and a ContextVar used by
+   `get_db()` / `enqueue()`.
+3. `get_db()` calls `set_search_path` when context is present.
+4. Skips binding for `/health`, `/docs`, `/redoc`, `/openapi.json`, `/metrics`,
+   `/api/auth/login|status|github/*`, and the Stripe webhook.
+
+### Jobs
+
+`enqueue()` appends `tenant_id` from the request ContextVar. Worker tasks accept an
+optional trailing `tenant_id` and open sessions via `open_tenant_session` (search_path
+bound). Legacy jobs with no `tenant_id` default to the cutover tenant (warning log).
+
+### Mel — no cross-tenant access
+
+Chat / MCP Mel routes depend on `require_tenant_context`. When enforce is on and no
+tenant is bound, they return **403** (`Tenant context required; no cross-tenant Mel.`).
+Membership checks reject `X-Tenant-Id` for tenants the user does not belong to.
 
 ---
 

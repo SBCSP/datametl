@@ -26,6 +26,10 @@ class Settings(BaseSettings):
     # Default True when AUTH_ENABLED; deprecate after GITHUB-OAUTH + TENANT-ENFORCE.
     auth_legacy_basic: bool = Field(True, alias="AUTH_LEGACY_BASIC")
 
+    # TENANT-ENFORCE: bind every request/job to a tenant schema via search_path.
+    # Default True; AUTH_LEGACY_BASIC + cutover tenant keep staging single-tenant installs working.
+    tenant_enforce_enabled: bool = Field(True, alias="TENANT_ENFORCE_ENABLED")
+
     # Personal GitHub OAuth v1 (GITHUB-OAUTH). Empty → feature disabled / clear errors.
     # Never commit real client secrets; use Knox / deploy secrets for production.
     github_oauth_client_id: str = Field("", alias="GITHUB_OAUTH_CLIENT_ID")

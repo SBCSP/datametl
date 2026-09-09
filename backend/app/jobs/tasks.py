@@ -23,6 +23,7 @@ from app.comparison import diff_schemas
 from app.connectors import for_engine
 from app.crypto import vault
 from app.db import SessionLocal
+from app.tenancy.job_bind import open_tenant_session
 from app.introspection.normalized import Schema
 from app.mapping import seed_mappings_for_comparison
 from app.migrations.runner import execute_run as execute_migration_run
@@ -58,7 +59,9 @@ def _load_connections(db: Any, connection_ids: list[str]) -> list[dict[str, Any]
     return conns
 
 
-async def introspect_connection(ctx: dict[str, Any], connection_id: str) -> dict[str, Any]:
+async def introspect_connection(
+    ctx: dict[str, Any], connection_id: str, tenant_id: str | None = None
+) -> dict[str, Any]:
     """Snapshot a connection's schema and persist it.
 
     Tracks an IntrospectionRun row (running → succeeded/failed) so the job shows up in the
@@ -72,7 +75,7 @@ async def introspect_connection(ctx: dict[str, Any], connection_id: str) -> dict
 
     # 1) Resolve the connection + open a 'running' run row, then release the session so we don't
     #    hold a DB connection open for the whole (potentially many-minute) introspection.
-    with SessionLocal() as db:
+    with open_tenant_session(tenant_id) as db:
         conn = db.get(Connection, conn_uuid)
         if conn is None:
             raise ValueError(f"Unknown connection: {connection_id}")
@@ -102,7 +105,7 @@ async def introspect_connection(ctx: dict[str, Any], connection_id: str) -> dict
             lambda: connector.introspect(connection_name=conn_name, on_progress=_on_progress)
         )
     except Exception as e:
-        with SessionLocal() as db:
+        with open_tenant_session(tenant_id) as db:
             db.execute(
                 update(IntrospectionRun)
                 .where(IntrospectionRun.id == run_id)
@@ -115,7 +118,7 @@ async def introspect_connection(ctx: dict[str, Any], connection_id: str) -> dict
     warnings = analyze_supabase(schema) if engine_name == "postgres" else []
 
     # 3) Persist the snapshot + finalize the run.
-    with SessionLocal() as db:
+    with open_tenant_session(tenant_id) as db:
         snapshot = SchemaSnapshot(
             connection_id=conn_uuid,
             normalized_schema=schema.model_dump(by_alias=True, mode="json"),
@@ -133,7 +136,9 @@ async def introspect_connection(ctx: dict[str, Any], connection_id: str) -> dict
         return {"snapshot_id": str(snapshot.id), "warnings": len(warnings), "tables": len(schema.tables)}
 
 
-async def run_comparison(ctx: dict[str, Any], comparison_id: str) -> dict[str, Any]:
+async def run_comparison(
+    ctx: dict[str, Any], comparison_id: str, tenant_id: str | None = None
+) -> dict[str, Any]:
     """Compute diff and seed default mappings for a comparison.
 
     Honors the comparison's optional schema scope: if both `source_schema` and
@@ -141,7 +146,7 @@ async def run_comparison(ctx: dict[str, Any], comparison_id: str) -> dict[str, A
     those schemas (with cross-schema name matching).
     """
     cmp_uuid = uuid.UUID(comparison_id)
-    with SessionLocal() as db:
+    with open_tenant_session(tenant_id) as db:
         cmp = db.get(Comparison, cmp_uuid)
         if cmp is None:
             raise ValueError(f"Unknown comparison: {comparison_id}")
@@ -177,7 +182,9 @@ async def run_comparison(ctx: dict[str, Any], comparison_id: str) -> dict[str, A
         }
 
 
-async def run_migration(ctx: dict[str, Any], run_id: str) -> dict[str, Any]:
+async def run_migration(
+    ctx: dict[str, Any], run_id: str, tenant_id: str | None = None
+) -> dict[str, Any]:
     """Execute a previously-created MigrationRun.
 
     The actual data movement is sync (psycopg COPY), so we offload to a thread to avoid
@@ -186,24 +193,28 @@ async def run_migration(ctx: dict[str, Any], run_id: str) -> dict[str, Any]:
     run_uuid = uuid.UUID(run_id)
 
     def _run() -> dict[str, Any]:
-        with SessionLocal() as db:
+        with open_tenant_session(tenant_id) as db:
             return execute_migration_run(db, run_uuid)
 
     return await asyncio.to_thread(_run)
 
 
-async def run_verification(ctx: dict[str, Any], run_id: str) -> dict[str, Any]:
+async def run_verification(
+    ctx: dict[str, Any], run_id: str, tenant_id: str | None = None
+) -> dict[str, Any]:
     """Execute a standalone VerificationRun. Reads only — never writes to either user DB."""
     run_uuid = uuid.UUID(run_id)
 
     def _run() -> dict[str, Any]:
-        with SessionLocal() as db:
+        with open_tenant_session(tenant_id) as db:
             return execute_verification_run(db, run_uuid)
 
     return await asyncio.to_thread(_run)
 
 
-async def run_pipeline(ctx: dict[str, Any], run_id: str) -> dict[str, Any]:
+async def run_pipeline(
+    ctx: dict[str, Any], run_id: str, tenant_id: str | None = None
+) -> dict[str, Any]:
     """Execute a previously-created PipelineRun. The steps are sync (psycopg COPY / SQL), so
     offload to a thread like the migration runner."""
     from app.etl.runner import execute_pipeline_run
@@ -211,13 +222,15 @@ async def run_pipeline(ctx: dict[str, Any], run_id: str) -> dict[str, Any]:
     run_uuid = uuid.UUID(run_id)
 
     def _run() -> dict[str, Any]:
-        with SessionLocal() as db:
+        with open_tenant_session(tenant_id) as db:
             return execute_pipeline_run(db, run_uuid)
 
     return await asyncio.to_thread(_run)
 
 
-async def _do_tap_fetch(tap_id: str, write_mode_override: str | None = None) -> dict[str, Any]:
+async def _do_tap_fetch(
+    tap_id: str, write_mode_override: str | None = None, tenant_id: str | None = None
+) -> dict[str, Any]:
     """Core of a tap fetch: open a TapRun, fetch the endpoint, land into destinations, finalize.
 
     Shared by the manual `fetch_tap` and the scheduled `run_scheduled_tap`. `write_mode_override`
@@ -227,7 +240,7 @@ async def _do_tap_fetch(tap_id: str, write_mode_override: str | None = None) -> 
     from app.taps.land import land_records
 
     tap_uuid = uuid.UUID(tap_id)
-    with SessionLocal() as db:
+    with open_tenant_session(tenant_id) as db:
         tap = db.get(Tap, tap_uuid)
         if tap is None:
             raise ValueError(f"Unknown tap: {tap_id}")
@@ -279,7 +292,7 @@ async def _do_tap_fetch(tap_id: str, write_mode_override: str | None = None) -> 
         status_str = "failed"
         error = str(getattr(e, "__cause__", None) or e)
 
-    with SessionLocal() as db:
+    with open_tenant_session(tenant_id) as db:
         db.execute(
             update(TapRun)
             .where(TapRun.id == run_id)
@@ -290,12 +303,16 @@ async def _do_tap_fetch(tap_id: str, write_mode_override: str | None = None) -> 
     return {"tap_id": tap_id, "run_id": str(run_id), "status": status_str, "records": record_count}
 
 
-async def fetch_tap(ctx: dict[str, Any], tap_id: str) -> dict[str, Any]:
+async def fetch_tap(
+    ctx: dict[str, Any], tap_id: str, tenant_id: str | None = None
+) -> dict[str, Any]:
     """Manual 'Fetch now' for a Tap — runs the shared fetch core with the tap's own write mode."""
-    return await _do_tap_fetch(tap_id)
+    return await _do_tap_fetch(tap_id, tenant_id=tenant_id)
 
 
-async def run_scheduled_tap(ctx: dict[str, Any], schedule_id: str) -> dict[str, Any]:
+async def run_scheduled_tap(
+    ctx: dict[str, Any], schedule_id: str, tenant_id: str | None = None
+) -> dict[str, Any]:
     """Fire a tap-targeting schedule: fetch the tap using the schedule's write-mode override.
 
     The TapRun produced by the fetch core is the run record (shows in the tap's history, the
@@ -303,7 +320,7 @@ async def run_scheduled_tap(ctx: dict[str, Any], schedule_id: str) -> dict[str, 
     from app.models.scheduled_script import ScheduledScript
 
     sched_uuid = uuid.UUID(schedule_id)
-    with SessionLocal() as db:
+    with open_tenant_session(tenant_id) as db:
         sched = db.get(ScheduledScript, sched_uuid)
         if sched is None:
             raise ValueError(f"Unknown schedule: {schedule_id}")
@@ -312,12 +329,16 @@ async def run_scheduled_tap(ctx: dict[str, Any], schedule_id: str) -> dict[str, 
         tap_id = str(sched.tap_id)
         write_mode = sched.tap_write_mode or "append"
 
-    result = await _do_tap_fetch(tap_id, write_mode_override=write_mode)
+    result = await _do_tap_fetch(tap_id, write_mode_override=write_mode, tenant_id=tenant_id)
     return {"schedule_id": schedule_id, **result}
 
 
 async def apply_schema(
-    ctx: dict[str, Any], snapshot_id: str, connection_id: str, schema_override: str | None = None
+    ctx: dict[str, Any],
+    snapshot_id: str,
+    connection_id: str,
+    schema_override: str | None = None,
+    tenant_id: str | None = None,
 ) -> dict[str, Any]:
     """Apply a snapshot's structure (lightweight CREATE-DDL) to a destination connection.
 
@@ -328,7 +349,7 @@ async def apply_schema(
 
     snap_uuid = uuid.UUID(snapshot_id)
     conn_uuid = uuid.UUID(connection_id)
-    with SessionLocal() as db:
+    with open_tenant_session(tenant_id) as db:
         snap = db.get(SchemaSnapshot, snap_uuid)
         if snap is None:
             raise ValueError(f"Unknown snapshot: {snapshot_id}")
@@ -352,7 +373,11 @@ async def apply_schema(
 
 
 async def execute_sql_script(
-    ctx: dict[str, Any], script_id: str, connection_ids: list[str], read_only: bool = True
+    ctx: dict[str, Any],
+    script_id: str,
+    connection_ids: list[str],
+    read_only: bool = True,
+    tenant_id: str | None = None,
 ) -> dict[str, Any]:
     """Run a saved SQL script against each selected connection and collect results.
 
@@ -367,7 +392,7 @@ async def execute_sql_script(
     # Decrypt credentials while the metadata session is open, then hand plain dicts to the
     # worker threads. A missing connection (deleted between save and run) is kept as a marker
     # so it surfaces as one failed card instead of aborting the run.
-    with SessionLocal() as db:
+    with open_tenant_session(tenant_id) as db:
         script = db.get(SqlScript, script_uuid)
         if script is None:
             raise ValueError(f"Unknown script: {script_id}")
@@ -408,7 +433,7 @@ def _summarize_connection(conn_result: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-async def dispatch_due_schedules(ctx: dict[str, Any]) -> dict[str, Any]:
+async def dispatch_due_schedules(ctx: dict[str, Any], tenant_id: str | None = None) -> dict[str, Any]:
     """Arq cron entrypoint (runs every minute): enqueue any enabled schedule that is due.
 
     For each due schedule we advance `next_run_at` to the next future occurrence *before*
@@ -420,7 +445,7 @@ async def dispatch_due_schedules(ctx: dict[str, Any]) -> dict[str, Any]:
 
     now = datetime.now(UTC)
     due: list[tuple[str, str]] = []
-    with SessionLocal() as db:
+    with open_tenant_session(tenant_id) as db:
         rows = list(
             db.execute(
                 select(ScheduledScript).where(
@@ -448,7 +473,9 @@ async def dispatch_due_schedules(ctx: dict[str, Any]) -> dict[str, Any]:
     return {"dispatched": len(due)}
 
 
-async def run_scheduled_script(ctx: dict[str, Any], schedule_id: str) -> dict[str, Any]:
+async def run_scheduled_script(
+    ctx: dict[str, Any], schedule_id: str, tenant_id: str | None = None
+) -> dict[str, Any]:
     """Execute one scheduled script run and persist a compact history record.
 
     Reuses the same execution core as the manual runner (read-only unless the schedule opts
@@ -457,7 +484,7 @@ async def run_scheduled_script(ctx: dict[str, Any], schedule_id: str) -> dict[st
     """
     sched_uuid = uuid.UUID(schedule_id)
 
-    with SessionLocal() as db:
+    with open_tenant_session(tenant_id) as db:
         sched = db.get(ScheduledScript, sched_uuid)
         if sched is None:
             raise ValueError(f"Unknown schedule: {schedule_id}")
@@ -497,7 +524,7 @@ async def run_scheduled_script(ctx: dict[str, Any], schedule_id: str) -> dict[st
         status_str = "failed"
         error = str(getattr(e, "__cause__", None) or e)
 
-    with SessionLocal() as db:
+    with open_tenant_session(tenant_id) as db:
         db.execute(
             update(ScheduledRun)
             .where(ScheduledRun.id == run_id)

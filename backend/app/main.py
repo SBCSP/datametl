@@ -35,6 +35,7 @@ from app.api import (
     settings as settings_api,
 )
 from app.config import settings
+from app.tenancy.middleware import TenantBindingMiddleware
 from app.mcp.server import create_http_app as create_external_mcp_app
 
 logging.basicConfig(level=settings.log_level)
@@ -95,7 +96,9 @@ class AuthMiddleware(BaseHTTPMiddleware):
         return await call_next(request)
 
 
-# NOTE: add auth first, CORS last → CORS is outermost (wraps auth's 401s with headers).
+# Middleware order (last added = outermost): CORS → Auth → TenantBinding → app.
+# Tenant binding runs after auth so /api 401s never hit the DB; CORS still wraps 401/403.
+app.add_middleware(TenantBindingMiddleware)
 app.add_middleware(AuthMiddleware)
 app.add_middleware(
     CORSMiddleware,
