@@ -49,9 +49,7 @@ def _should_skip(request: Request) -> bool:
         return True
     if path == "/openapi.json":
         return True
-    if path.startswith("/docs") or path.startswith("/redoc"):
-        return True
-    return False
+    return path.startswith("/docs") or path.startswith("/redoc")
 
 
 def _bearer_subject(request: Request) -> str | None:
