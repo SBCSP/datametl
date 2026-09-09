@@ -6,6 +6,7 @@ import { useQuery } from "@tanstack/react-query";
 import {
   ArrowRight,
   ArrowRightLeft,
+  Bot,
   CalendarClock,
   Database,
   GitCompareArrows,
@@ -46,6 +47,7 @@ const TYPE_ICON: Record<ActivityType, React.ComponentType<{ className?: string }
   pipeline: Network,
   scheduled: CalendarClock,
   api_fetch: Radio,
+  mel_tool: Bot,
 };
 
 function statusVariant(status: string): "success" | "destructive" | "secondary" | "outline" {

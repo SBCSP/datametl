@@ -22,6 +22,9 @@ class Settings(BaseSettings):
     auth_username: str = Field("admin", alias="AUTH_USERNAME")
     auth_password: str = Field("", alias="AUTH_PASSWORD")
     auth_token_ttl_hours: int = Field(168, alias="AUTH_TOKEN_TTL_HOURS")
+    # One-release escape hatch: keep username/password login while GitHub OAuth lands.
+    # Default True when AUTH_ENABLED; deprecate after GITHUB-OAUTH + TENANT-ENFORCE.
+    auth_legacy_basic: bool = Field(True, alias="AUTH_LEGACY_BASIC")
 
     # Prometheus scrape endpoint at /metrics (outside /api, so not gated by AUTH_ENABLED).
     # Set METRICS_TOKEN to require `Authorization: Bearer <token>` from the scraper.

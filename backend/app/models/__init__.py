@@ -29,9 +29,16 @@ from app.models.pipeline import (  # noqa: E402
     PipelineStep,
 )
 from app.models.scheduled_script import ScheduledRun, ScheduledScript  # noqa: E402
-from app.models.tap import Tap, TapRun  # noqa: E402
 from app.models.schema_snapshot import SchemaSnapshot  # noqa: E402
 from app.models.sql_script import SqlScript  # noqa: E402
+from app.models.tap import Tap, TapRun  # noqa: E402
+from app.models.tenant_control import (  # noqa: E402
+    OAuthIdentity,
+    Tenant,
+    TenantLicense,
+    TenantMembership,
+    User,
+)
 from app.models.verification_run import VerificationRun, VerificationRunStatus  # noqa: E402
 from app.models.verification_run_table import (  # noqa: E402
     VerificationRunTable,
@@ -52,6 +59,7 @@ __all__ = [
     "MigrationRun",
     "MigrationRunStatus",
     "MigrationRunTable",
+    "OAuthIdentity",
     "Pipeline",
     "PipelineRun",
     "PipelineRunStep",
@@ -60,9 +68,13 @@ __all__ = [
     "ScheduledScript",
     "SchemaSnapshot",
     "SqlScript",
+    "TableRunStatus",
     "Tap",
     "TapRun",
-    "TableRunStatus",
+    "Tenant",
+    "TenantLicense",
+    "TenantMembership",
+    "User",
     "VerificationRun",
     "VerificationRunStatus",
     "VerificationRunTable",
