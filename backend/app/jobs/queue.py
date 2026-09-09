@@ -10,15 +10,28 @@ from arq.jobs import Job, JobStatus
 from app.config import settings
 from app.jobs import progress as progress_mod
 
+_UNSET: object = object()
+
 
 async def get_pool() -> ArqRedis:
     return await create_pool(RedisSettings.from_dsn(settings.redis_url))
 
 
-async def enqueue(function: str, *args: Any) -> str:
+async def enqueue(function: str, *args: Any, tenant_id: Any = _UNSET) -> str:
+    """Enqueue an arq job, appending ``tenant_id`` as the last positional arg.
+
+    When ``tenant_id`` is omitted, uses the current request ContextVar (set by
+    TenantBindingMiddleware). Explicit ``None`` means legacy/cutover fallback in the worker.
+    """
+    if tenant_id is _UNSET:
+        from app.tenancy.context import get_tenant_context
+
+        ctx = get_tenant_context()
+        tenant_id = str(ctx.tenant_id) if ctx is not None else None
+    job_args = (*args, tenant_id)
     pool = await get_pool()
     try:
-        job = await pool.enqueue_job(function, *args)
+        job = await pool.enqueue_job(function, *job_args)
         if job is None:
             raise RuntimeError("arq returned no job — Redis unavailable?")
         return job.job_id

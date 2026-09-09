@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **TENANT-ENFORCE**: real `TenantBindingMiddleware` (membership / `X-Tenant-Id` / cutover fallback), `get_db` + job `search_path` binding, Mel fail-closed without tenant context, env `TENANT_ENFORCE_ENABLED` (default true). See `docs/TENANT_SCHEMA.md`.
 - Personal **GitHub OAuth v1** (**GITHUB-OAUTH**): `GitHubOAuthProvider` (httpx authorize + code exchange), `/api/auth/github/start` + `/callback` linking `OAuthIdentity`, env `GITHUB_OAUTH_CLIENT_ID` / `GITHUB_OAUTH_CLIENT_SECRET` / `GITHUB_OAUTH_REDIRECT_URI` (empty = disabled). See `docs/GITHUB_OAUTH.md`.
 - Schema-per-tenant foundation (**TENANT-SCHEMA**): public control models (`tenants`, `users`, `oauth_identities`, `tenant_memberships`, `tenant_licenses`), `app.tenancy` provision + `set_search_path`, tenant template runner, `python -m app.scripts.cutover_tenant_schema` (SET SCHEMA), `AUTH_LEGACY_BASIC` escape hatch. Schema names locked to `tenant_<uuidhex>`.
 - In-app **Trust** page at `/trust` (sidebar + Settings links) and `docs/TRUST.md` / `docs/LAUNCH.md` launch copy.

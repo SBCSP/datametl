@@ -5,13 +5,18 @@ from sqlalchemy.orm import Session
 
 from app.api.schemas_io import McpActivateRequest, McpActiveResponse
 from app.db import get_db
+from app.tenancy.deps import require_tenant_context
+from app.tenancy.middleware import TenantContext
 from app.mcp.state import clear_active, get_active_connection, set_active
 
 router = APIRouter(prefix="/api/mcp", tags=["mcp"])
 
 
 @router.get("/active", response_model=McpActiveResponse | None)
-def get_active(db: Session = Depends(get_db)) -> McpActiveResponse | None:
+def get_active(
+    db: Session = Depends(get_db),
+    _tenant: TenantContext | None = Depends(require_tenant_context),
+) -> McpActiveResponse | None:
     conn = get_active_connection(db)
     if conn is None:
         return None
@@ -19,7 +24,11 @@ def get_active(db: Session = Depends(get_db)) -> McpActiveResponse | None:
 
 
 @router.post("/activate", response_model=McpActiveResponse)
-def activate(payload: McpActivateRequest, db: Session = Depends(get_db)) -> McpActiveResponse:
+def activate(
+    payload: McpActivateRequest,
+    db: Session = Depends(get_db),
+    _tenant: TenantContext | None = Depends(require_tenant_context),
+) -> McpActiveResponse:
     """Make a connection the sole active read-only MCP target (replaces any current one)."""
     try:
         conn = set_active(db, payload.connection_id)
@@ -29,5 +38,8 @@ def activate(payload: McpActivateRequest, db: Session = Depends(get_db)) -> McpA
 
 
 @router.post("/deactivate", status_code=status.HTTP_204_NO_CONTENT)
-def deactivate(db: Session = Depends(get_db)) -> None:
+def deactivate(
+    db: Session = Depends(get_db),
+    _tenant: TenantContext | None = Depends(require_tenant_context),
+) -> None:
     clear_active(db)
