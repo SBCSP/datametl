@@ -29,6 +29,7 @@ from app.api import (
     snapshots,
     sql_scripts,
     taps,
+    tenants,
     verifications,
 )
 from app.api import (
@@ -109,6 +110,7 @@ app.add_middleware(
 )
 
 app.include_router(auth.router)
+app.include_router(tenants.router)
 app.include_router(connections.router)
 app.include_router(snapshots.router)
 app.include_router(comparisons.router)

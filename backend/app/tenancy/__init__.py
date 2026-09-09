@@ -17,6 +17,7 @@ from app.tenancy.names import (
     tenant_schema_name,
 )
 from app.tenancy.provision import create_tenant_schema, provision_tenant
+from app.tenancy.slug import is_valid_slug, slugify_name
 from app.tenancy.search_path import set_search_path
 
 __all__ = [
@@ -24,9 +25,11 @@ __all__ = [
     "TENANT_TEMPLATE_REVISION",
     "TenantContext",
     "create_tenant_schema",
+    "is_valid_slug",
     "is_valid_tenant_schema_name",
     "provision_tenant",
     "set_search_path",
+    "slugify_name",
     "tenant_id_from_schema_name",
     "tenant_schema_name",
     "upgrade_tenant_schema",

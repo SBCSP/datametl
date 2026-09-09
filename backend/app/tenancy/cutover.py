@@ -45,7 +45,7 @@ def ensure_default_tenant_row(db: Session, *, name: str = "Default") -> Tenant:
     existing = db.get(Tenant, tid)
     if existing is not None:
         return existing
-    tenant = Tenant(id=tid, kind="org", name=name, schema_name=schema_name)
+    tenant = Tenant(id=tid, kind="org", name=name, slug="default", schema_name=schema_name)
     db.add(tenant)
     db.add(TenantLicense(tenant_id=tid, tier="community"))
     db.commit()
