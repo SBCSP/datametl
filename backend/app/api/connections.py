@@ -22,6 +22,7 @@ from app.crypto import vault
 from app.db import get_db
 from app.jobs.queue import enqueue
 from app.models.connection import Connection
+from app.tenancy.app_db_guard import AppDatabaseBlockedError, assert_not_app_metadata_db
 
 router = APIRouter(prefix="/api/connections", tags=["connections"])
 
@@ -46,6 +47,13 @@ def list_connections(db: Session = Depends(get_db)) -> list[Connection]:
 @router.post("", response_model=ConnectionRead, status_code=status.HTTP_201_CREATED)
 def create_connection(payload: ConnectionCreate, db: Session = Depends(get_db)) -> Connection:
     require_engine_allowed(db, payload.engine)
+    try:
+        assert_not_app_metadata_db(
+            engine=payload.engine,
+            credentials=payload.credentials.model_dump(),
+        )
+    except AppDatabaseBlockedError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
     conn = Connection(
         name=payload.name,
         engine=payload.engine,
@@ -98,6 +106,10 @@ def update_connection(
         existing = vault.decrypt(conn.encrypted_credentials)
         updates = payload.credentials.model_dump(exclude_unset=True)
         merged = {**existing, **updates}
+        try:
+            assert_not_app_metadata_db(engine=conn.engine, credentials=merged)
+        except AppDatabaseBlockedError as e:
+            raise HTTPException(status_code=400, detail=str(e)) from e
         conn.encrypted_credentials = vault.encrypt(merged)
     try:
         db.commit()
@@ -132,6 +144,10 @@ def test_connection(connection_id: uuid.UUID, db: Session = Depends(get_db)) -> 
     if conn is None:
         raise HTTPException(404, "Connection not found")
     creds = vault.decrypt(conn.encrypted_credentials)
+    try:
+        assert_not_app_metadata_db(engine=conn.engine, credentials=creds)
+    except AppDatabaseBlockedError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
     result = for_engine(conn.engine, creds).test_connection()
     return TestConnectionResult(ok=result.ok, detail=result.detail)
 
