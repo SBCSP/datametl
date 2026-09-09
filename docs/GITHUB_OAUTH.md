@@ -19,10 +19,14 @@ Also required for login flows: `AUTH_ENABLED=true`. Keep `AUTH_LEGACY_BASIC=true
 ## Routes
 
 - `GET /api/auth/github/start` — 302 to GitHub authorize (or `?json=1` → `{authorize_url, state}`)
-- `GET /api/auth/github/callback?code=&state=` — exchanges code via httpx, links `OAuthIdentity`, returns the same bearer `LoginResponse` as `/api/auth/login`
+- `GET /api/auth/github/callback?code=&state=` — exchanges code via httpx, links `OAuthIdentity`; browsers (Accept: text/html) 302 to `/login#token=…`, API clients get `LoginResponse` JSON
 - `GET /api/auth/status` — includes `github_oauth_enabled` / `legacy_basic_enabled`
 
 Access tokens from GitHub are **not** persisted on `OAuthIdentity.profile` (non-secret profile stub only).
+
+## Frontend
+
+`/login` shows **Continue with GitHub** when `github_oauth_enabled` is true (from `/api/auth/status`). Browser OAuth completes via callback → `/login#token=…` → `setToken`.
 
 ## Local setup sketch
 
@@ -32,6 +36,6 @@ Access tokens from GitHub are **not** persisted on `OAuthIdentity.profile` (non-
 
 ## Out of scope
 
-- Full login UI polish / frontend redirect landing page
+- Broader IdP support beyond personal GitHub OAuth v1
 - TENANT-ENFORCE (request → tenant schema binding)
 - Storing GitHub tokens for API calls as the user

@@ -268,12 +268,25 @@ def test_github_callback_links_and_issues_token(
     resp = client.get(
         "/api/auth/github/callback",
         params={"code": "ok", "state": state},
+        headers={"Accept": "application/json"},
     )
     assert resp.status_code == 200
     body = resp.json()
     assert body["username"] == "cb@example.com"
     assert body["token"]
     assert body["expires_at"] > 0
+
+    state2 = issue_oauth_state()
+    html = client.get(
+        "/api/auth/github/callback",
+        params={"code": "ok", "state": state2},
+        headers={"Accept": "text/html,application/xhtml+xml"},
+        follow_redirects=False,
+    )
+    assert html.status_code == 302
+    loc = html.headers["location"]
+    assert loc.startswith("/login#")
+    assert "token=" in loc
 
 
 def test_github_callback_rejects_bad_state(github_settings: GitHubOAuthConfig) -> None:
