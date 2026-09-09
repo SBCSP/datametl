@@ -90,13 +90,22 @@ def upgrade_tenant_schema(
     name = assert_safe_schema_name(schema_name)
     conn, owns = _conn(engine_or_conn)
     try:
-        with conn.begin():
-            conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{name}"'))
+
+        def _apply(connection: Connection) -> str:
+            connection.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{name}"'))
             meta = clone_tenant_metadata(name)
-            meta.create_all(bind=conn, checkfirst=True)
-            stamp_tenant_revision(conn, name, revision)
+            meta.create_all(bind=connection, checkfirst=True)
+            stamp_tenant_revision(connection, name, revision)
             log.info("tenant schema %s upgraded/stamped to %s", name, revision)
             return revision
+
+        # When called with an Engine we own the connection and must begin.
+        # When called with a Session-bound Connection (provision path), a
+        # transaction is already open — nested begin() raises on Postgres.
+        if owns:
+            with conn.begin():
+                return _apply(conn)
+        return _apply(conn)
     finally:
         if owns:
             conn.close()
