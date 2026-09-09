@@ -29,4 +29,5 @@ ENV PATH="/opt/venv/bin:$PATH"
 
 EXPOSE 8000
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+# Shell form so Railway $PORT is honored; no --reload in container images.
+CMD uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}
