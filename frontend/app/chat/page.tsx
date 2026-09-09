@@ -325,7 +325,7 @@ function ChatPageBody() {
     }
   }
 
-  function useSuggestion(text: string) {
+  function applySuggestion(text: string) {
     setInput(text);
     inputRef.current?.focus();
   }
@@ -476,7 +476,7 @@ function ChatPageBody() {
                       <button
                         key={s}
                         type="button"
-                        onClick={() => useSuggestion(s)}
+                        onClick={() => applySuggestion(s)}
                         className="rounded-lg border bg-card px-3 py-2.5 text-left text-sm text-muted-foreground transition-colors hover:border-primary/40 hover:bg-accent hover:text-foreground"
                       >
                         {s}
