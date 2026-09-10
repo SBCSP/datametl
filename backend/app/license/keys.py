@@ -13,7 +13,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey,
 
 # DEV / release-v1 public key (pair generated for Phase 1; private key is NOT in git).
 # Generate a new pair: `python scripts/issue_license.py --gen-keypair`
-_EMBEDDED_PUBLIC_KEY_B64URL = "m4X_8VCOIRSgjPqC1c4kaZyJ9f6g6uzeAK0kKG6IluE"
+_EMBEDDED_PUBLIC_KEY_B64URL = "k9qTNN3yYthke0qtKpMq744IMHNncqozcvE04pxVG3k"
 
 
 def _b64url_decode(value: str) -> bytes:
