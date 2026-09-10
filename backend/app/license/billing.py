@@ -730,7 +730,7 @@ def enrich_price_ok(obj: dict[str, Any], price_ok: bool) -> bool:
     return False
 
 
-def _log_ignored_or_error(result: "IssuanceResult", event_type: str) -> "IssuanceResult":
+def _log_ignored_or_error(result: IssuanceResult, event_type: str) -> IssuanceResult:
     """INFO-log every ignored/error outcome so ops can see remint failures."""
     if result.status in ("ignored", "error"):
         logger.info(
