@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **LICENSE-EXPIRY**: Stripe-minted Pro keys set `expires_at` from subscription `current_period_end` (not perpetual); `invoice.paid` refreshes/extends the key; canceled / `cancel_at_period_end` skips renew. Manual `make license-issue` comps may still be perpetual.
 - **Harden Connections**: blocklist create / test / update when host+database match the app metadata `DATABASE_URL` (loopback aliases normalized carefully). Helper `app.tenancy.app_db_guard`; Mel/MCP already use Connection rows so blocking create/test is enough.
 - **TENANT-ENFORCE**: real `TenantBindingMiddleware` (membership / `X-Tenant-Id` / cutover fallback), `get_db` + job `search_path` binding, Mel fail-closed without tenant context, env `TENANT_ENFORCE_ENABLED` (default true). See `docs/TENANT_SCHEMA.md`.
 - Personal **GitHub OAuth v1** (**GITHUB-OAUTH**): `GitHubOAuthProvider` (httpx authorize + code exchange), `/api/auth/github/start` + `/callback` linking `OAuthIdentity`, env `GITHUB_OAUTH_CLIENT_ID` / `GITHUB_OAUTH_CLIENT_SECRET` / `GITHUB_OAUTH_REDIRECT_URI` (empty = disabled). See `docs/GITHUB_OAUTH.md`.

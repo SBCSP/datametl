@@ -3,7 +3,9 @@
 Self-hosted Community/Pro installs do **not** need Stripe secrets. Issuer mode is only
 active when ``STRIPE_SECRET_KEY`` and ``STRIPE_WEBHOOK_SECRET`` are both set (plus
 ``LICENSE_SIGNING_KEY`` to mint keys). Customer Payment Links stay on Stripe-hosted
-Checkout; this module verifies webhooks and emails/logs a signed ``dmtl1`` Pro key.
+Checkout; this module verifies webhooks and emails/logs a signed ``dmtl1`` Pro key
+bound to the subscription ``current_period_end`` (refreshed on ``invoice.paid``;
+no renew after cancel).
 """
 from __future__ import annotations
 
@@ -349,12 +351,112 @@ def deliver_license_key(*, email: str, license_key: str) -> str:
         return "log"
 
 
-def mint_pro_license(*, email: str) -> str:
-    """Sign a perpetual Pro dmtl1 key for the customer email."""
+def _ts_to_utc(value: Any) -> datetime | None:
+    """Convert a Stripe unix timestamp (or datetime) to timezone-aware UTC."""
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        dt = value
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=UTC)
+        return dt.astimezone(UTC)
+    if isinstance(value, (int, float)):
+        return datetime.fromtimestamp(int(value), tz=UTC)
+    if isinstance(value, str):
+        text = value.strip()
+        if text.isdigit():
+            return datetime.fromtimestamp(int(text), tz=UTC)
+    return None
+
+
+def _nested_subscription(obj: dict[str, Any]) -> dict[str, Any] | None:
+    """Return an expanded subscription dict nested on checkout / invoice objects."""
+    sub = obj.get("subscription")
+    if isinstance(sub, dict):
+        return sub
+    parent = obj.get("parent")
+    if isinstance(parent, dict):
+        details = parent.get("subscription_details")
+        if isinstance(details, dict):
+            nested = details.get("subscription")
+            if isinstance(nested, dict):
+                return nested
+    return None
+
+
+def period_end_from_stripe_object(obj: dict[str, Any]) -> datetime | None:
+    """Best-effort ``current_period_end`` / line period end from Stripe event objects."""
+    for key in ("current_period_end", "period_end"):
+        dt = _ts_to_utc(obj.get(key))
+        if dt is not None:
+            return dt
+
+    # invoice / checkout line items carry period.end
+    ends: list[datetime] = []
+    for container_key in ("lines", "line_items"):
+        container = obj.get(container_key)
+        items: list[Any] = []
+        if isinstance(container, dict):
+            items = list(container.get("data") or [])
+        elif isinstance(container, list):
+            items = container
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            period = item.get("period")
+            if isinstance(period, dict):
+                dt = _ts_to_utc(period.get("end"))
+                if dt is not None:
+                    ends.append(dt)
+    if ends:
+        return max(ends)
+
+    nested = _nested_subscription(obj)
+    if nested is not None and nested is not obj:
+        return period_end_from_stripe_object(nested)
+    return None
+
+
+def subscription_will_not_renew(obj: dict[str, Any]) -> bool:
+    """True when the subscription is canceled or scheduled not to renew.
+
+    Used so ``invoice.paid`` (and equivalent mint events) do not refresh/extend a
+    license after cancel — the customer keeps any key already minted for the paid
+    period, which expires at that period end.
+
+    Only subscription-shaped objects are inspected (never invoice ``status``, which
+    uses a different enum).
+    """
+    candidates: list[dict[str, Any]] = []
+    # subscription.created / expanded subscription on checkout or invoice
+    if obj.get("object") == "subscription" or "cancel_at_period_end" in obj:
+        candidates.append(obj)
+    nested = _nested_subscription(obj)
+    if nested is not None:
+        candidates.append(nested)
+
+    for cand in candidates:
+        status = str(cand.get("status") or "").lower()
+        if status in ("canceled", "unpaid", "incomplete_expired"):
+            return True
+        if cand.get("cancel_at_period_end") is True:
+            return True
+        if cand.get("canceled_at") is not None and status in ("canceled", ""):
+            return True
+    return False
+
+
+def mint_pro_license(*, email: str, expires_at: datetime | None = None) -> str:
+    """Sign a Pro dmtl1 key for the customer email.
+
+    Stripe-minted keys MUST pass ``expires_at`` from the subscription period end
+    (not perpetual). Manual comps via ``make license-issue`` / ``issue_license.py``
+    may omit ``expires_at`` for a perpetual key.
+    """
     payload = LicensePayload(
         tier="pro",
         issued_at=datetime.now(UTC),
-        expires_at=None,
+        expires_at=expires_at,
         email=email,
     )
     return issue_license(payload)
@@ -444,8 +546,28 @@ def process_stripe_event(event: dict[str, Any] | Any) -> IssuanceResult:
             reason="missing_customer_email",
         )
 
+    # No renew after cancel: do not mint/refresh when sub is canceled / won't renew.
+    if subscription_will_not_renew(obj):
+        return IssuanceResult(
+            status="ignored",
+            event_id=event_id or "unknown",
+            email=email,
+            session_id=session_id,
+            reason="subscription_canceled_or_non_renewing",
+        )
+
+    expires_at = period_end_from_stripe_object(obj)
+    if expires_at is None:
+        return IssuanceResult(
+            status="ignored",
+            event_id=event_id or "unknown",
+            email=email,
+            session_id=session_id,
+            reason="missing_period_end",
+        )
+
     try:
-        license_key = mint_pro_license(email=email)
+        license_key = mint_pro_license(email=email, expires_at=expires_at)
     except Exception as e:
         logger.exception("Failed to mint license for %s", email)
         return IssuanceResult(
