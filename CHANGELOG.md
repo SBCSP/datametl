@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **LICENSE-EXPIRY remint (Payment Link / new Stripe API):** `checkout.session.completed` with `subscription` as a string id retrieves the Subscription for `current_period_end`; `customer.subscription.created` reads period from `items[].current_period_end` and resolves email via `Customer.retrieve` when `customer` is an id; `invoice.paid` matches Pro price from `pricing.price_details.price`. Ignored/error issuance outcomes are logged at INFO with reason.
+
 ### Added
 
 - **LICENSE-EXPIRY**: Stripe-minted Pro keys set `expires_at` from subscription `current_period_end` (not perpetual); `invoice.paid` refreshes/extends the key; canceled / `cancel_at_period_end` skips renew. Manual `make license-issue` comps may still be perpetual.
