@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -48,6 +49,13 @@ def issuer_env(monkeypatch: pytest.MonkeyPatch, signing_env: tuple[str, str], tm
     return store
 
 
+# Fixed period end for deterministic asserts (2026-10-09T00:00:00Z)
+PERIOD_END_TS = 1791504000
+PERIOD_END_DT = datetime(2026, 10, 9, 0, 0, 0, tzinfo=UTC)
+PERIOD_END_REFRESH_TS = 1794182400  # 2026-11-09T00:00:00Z
+PERIOD_END_REFRESH_DT = datetime(2026, 11, 9, 0, 0, 0, tzinfo=UTC)
+
+
 def _checkout_event(
     *,
     event_id: str = "evt_test_1",
@@ -56,6 +64,9 @@ def _checkout_event(
     price_id: str = PRO_PRICE,
     payment_status: str = "paid",
     status: str = "complete",
+    period_end: int = PERIOD_END_TS,
+    cancel_at_period_end: bool = False,
+    subscription_status: str = "active",
 ) -> dict:
     return {
         "id": event_id,
@@ -71,6 +82,50 @@ def _checkout_event(
                 "customer_details": {"email": email},
                 "line_items": {
                     "data": [{"price": {"id": price_id}}],
+                },
+                "subscription": {
+                    "id": "sub_test_1",
+                    "object": "subscription",
+                    "status": subscription_status,
+                    "cancel_at_period_end": cancel_at_period_end,
+                    "current_period_end": period_end,
+                },
+            }
+        },
+    }
+
+
+def _invoice_paid_event(
+    *,
+    event_id: str = "evt_inv",
+    email: str = "inv@example.com",
+    price_id: str = PRO_PRICE,
+    period_end: int = PERIOD_END_TS,
+    cancel_at_period_end: bool = False,
+    subscription_status: str = "active",
+) -> dict:
+    return {
+        "id": event_id,
+        "type": "invoice.paid",
+        "data": {
+            "object": {
+                "object": "invoice",
+                "customer_email": email,
+                "status": "paid",
+                "lines": {
+                    "data": [
+                        {
+                            "price": {"id": price_id},
+                            "period": {"start": period_end - 30 * 86400, "end": period_end},
+                        }
+                    ]
+                },
+                "subscription": {
+                    "id": "sub_inv_1",
+                    "object": "subscription",
+                    "status": subscription_status,
+                    "cancel_at_period_end": cancel_at_period_end,
+                    "current_period_end": period_end,
                 },
             }
         },
@@ -106,6 +161,7 @@ def test_process_checkout_mints_pro_license(issuer_env, signing_env) -> None:
     payload = verify_license(result.license_key)
     assert payload.tier == "pro"
     assert payload.email == "buyer@example.com"
+    assert payload.expires_at == PERIOD_END_DT
 
 
 def test_idempotent_replay_same_event(issuer_env, signing_env) -> None:
@@ -153,20 +209,84 @@ def test_ignores_wrong_price(issuer_env, signing_env) -> None:
 def test_invoice_paid_mints(issuer_env, signing_env) -> None:
     from app.license.billing import process_stripe_event
 
-    event = {
-        "id": "evt_inv",
-        "type": "invoice.paid",
-        "data": {
-            "object": {
-                "object": "invoice",
-                "customer_email": "inv@example.com",
-                "lines": {"data": [{"price": {"id": PRO_PRICE}}]},
-            }
-        },
-    }
-    result = process_stripe_event(event)
+    result = process_stripe_event(_invoice_paid_event())
     assert result.status == "issued"
     assert result.email == "inv@example.com"
+    payload = verify_license(result.license_key)
+    assert payload.expires_at == PERIOD_END_DT
+
+
+def test_invoice_paid_refreshes_period_end(issuer_env, signing_env) -> None:
+    """Renewal invoice.paid re-signs with the new current_period_end."""
+    from app.license.billing import process_stripe_event
+
+    first = process_stripe_event(
+        _invoice_paid_event(event_id="evt_inv_1", period_end=PERIOD_END_TS)
+    )
+    assert first.status == "issued"
+    assert verify_license(first.license_key).expires_at == PERIOD_END_DT
+
+    renewed = process_stripe_event(
+        _invoice_paid_event(event_id="evt_inv_2", period_end=PERIOD_END_REFRESH_TS)
+    )
+    assert renewed.status == "issued"
+    assert renewed.license_key != first.license_key
+    assert verify_license(renewed.license_key).expires_at == PERIOD_END_REFRESH_DT
+
+
+def test_invoice_paid_no_renew_when_cancel_at_period_end(issuer_env, signing_env) -> None:
+    from app.license.billing import process_stripe_event
+
+    result = process_stripe_event(
+        _invoice_paid_event(event_id="evt_cancel_cap", cancel_at_period_end=True)
+    )
+    assert result.status == "ignored"
+    assert result.reason == "subscription_canceled_or_non_renewing"
+    assert result.license_key is None
+
+
+def test_invoice_paid_no_renew_when_subscription_canceled(issuer_env, signing_env) -> None:
+    from app.license.billing import process_stripe_event
+
+    result = process_stripe_event(
+        _invoice_paid_event(
+            event_id="evt_canceled",
+            subscription_status="canceled",
+            cancel_at_period_end=False,
+        )
+    )
+    assert result.status == "ignored"
+    assert result.reason == "subscription_canceled_or_non_renewing"
+
+
+def test_checkout_ignored_without_period_end(issuer_env, signing_env) -> None:
+    from app.license.billing import process_stripe_event
+
+    event = _checkout_event(event_id="evt_no_period")
+    # Strip period sources
+    event["data"]["object"].pop("subscription")
+    result = process_stripe_event(event)
+    assert result.status == "ignored"
+    assert result.reason == "missing_period_end"
+
+
+def test_mint_pro_license_manual_perpetual(signing_env) -> None:
+    """Comps / make license-issue path may still mint perpetual keys."""
+    from app.license.billing import mint_pro_license
+
+    key = mint_pro_license(email="comp@example.com")
+    payload = verify_license(key)
+    assert payload.tier == "pro"
+    assert payload.email == "comp@example.com"
+    assert payload.expires_at is None
+
+
+def test_mint_pro_license_period_bound(signing_env) -> None:
+    from app.license.billing import mint_pro_license
+
+    key = mint_pro_license(email="buyer@example.com", expires_at=PERIOD_END_DT)
+    payload = verify_license(key)
+    assert payload.expires_at == PERIOD_END_DT
 
 
 def test_unhandled_event_ignored(issuer_env, signing_env) -> None:
