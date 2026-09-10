@@ -158,7 +158,11 @@ def _construct_event(payload: bytes, signature_header: str) -> Any:
 
 
 def _price_ids_from_obj(obj: dict[str, Any]) -> set[str]:
-    """Best-effort extract Stripe Price ids from checkout / invoice / subscription objects."""
+    """Best-effort extract Stripe Price ids from checkout / invoice / subscription objects.
+
+    Newer Invoice line items expose the price under ``pricing.price_details.price``
+    (string id or expanded object) rather than top-level ``price`` / ``plan``.
+    """
     found: set[str] = set()
 
     def _add(price: Any) -> None:
@@ -168,6 +172,16 @@ def _price_ids_from_obj(obj: dict[str, Any]) -> set[str]:
             pid = price.get("id")
             if isinstance(pid, str) and pid.startswith("price_"):
                 found.add(pid)
+
+    def _add_from_line_item(item: dict[str, Any]) -> None:
+        _add(item.get("price"))
+        _add(item.get("plan"))
+        pricing = item.get("pricing")
+        if isinstance(pricing, dict):
+            details = pricing.get("price_details")
+            if isinstance(details, dict):
+                _add(details.get("price"))
+            _add(pricing.get("price"))
 
     meta = obj.get("metadata") or {}
     if isinstance(meta, dict):
@@ -179,15 +193,15 @@ def _price_ids_from_obj(obj: dict[str, Any]) -> set[str]:
     if isinstance(line_items, dict):
         for item in line_items.get("data") or []:
             if isinstance(item, dict):
-                _add(item.get("price"))
+                _add_from_line_item(item)
     elif isinstance(line_items, list):
         for item in line_items:
             if isinstance(item, dict):
-                _add(item.get("price"))
+                _add_from_line_item(item)
 
     for item in obj.get("display_items") or []:
         if isinstance(item, dict):
-            _add(item.get("price"))
+            _add_from_line_item(item)
             plan = item.get("plan")
             if isinstance(plan, dict):
                 _add(plan.get("id"))
@@ -197,16 +211,27 @@ def _price_ids_from_obj(obj: dict[str, Any]) -> set[str]:
     if isinstance(lines, dict):
         for item in lines.get("data") or []:
             if isinstance(item, dict):
-                _add(item.get("price"))
-                _add(item.get("plan"))
+                _add_from_line_item(item)
+    elif isinstance(lines, list):
+        for item in lines:
+            if isinstance(item, dict):
+                _add_from_line_item(item)
 
     # subscription.items
     items = obj.get("items")
     if isinstance(items, dict):
         for item in items.get("data") or []:
             if isinstance(item, dict):
-                _add(item.get("price"))
-                _add(item.get("plan"))
+                _add_from_line_item(item)
+    elif isinstance(items, list):
+        for item in items:
+            if isinstance(item, dict):
+                _add_from_line_item(item)
+
+    # Recurse into expanded nested subscription (checkout / invoice).
+    nested = _nested_subscription(obj)
+    if nested is not None and nested is not obj:
+        found |= _price_ids_from_obj(nested)
 
     return found
 
@@ -384,25 +409,168 @@ def _nested_subscription(obj: dict[str, Any]) -> dict[str, Any] | None:
     return None
 
 
+def _subscription_id_from_obj(obj: dict[str, Any]) -> str | None:
+    """Return a Stripe subscription id string when present (top-level or nested)."""
+    sub = obj.get("subscription")
+    if isinstance(sub, str) and sub.startswith("sub_"):
+        return sub
+    if isinstance(sub, dict):
+        sid = sub.get("id")
+        if isinstance(sid, str) and sid.startswith("sub_"):
+            return sid
+    parent = obj.get("parent")
+    if isinstance(parent, dict):
+        details = parent.get("subscription_details")
+        if isinstance(details, dict):
+            nested = details.get("subscription")
+            if isinstance(nested, str) and nested.startswith("sub_"):
+                return nested
+            if isinstance(nested, dict):
+                sid = nested.get("id")
+                if isinstance(sid, str) and sid.startswith("sub_"):
+                    return sid
+    if obj.get("object") == "subscription":
+        sid = obj.get("id")
+        if isinstance(sid, str) and sid.startswith("sub_"):
+            return sid
+    return None
+
+
+def _customer_id_from_obj(obj: dict[str, Any]) -> str | None:
+    """Return a Stripe customer id when ``customer`` is a string (or nested)."""
+    customer = obj.get("customer")
+    if isinstance(customer, str) and customer.startswith("cus_"):
+        return customer
+    if isinstance(customer, dict):
+        cid = customer.get("id")
+        if isinstance(cid, str) and cid.startswith("cus_"):
+            return cid
+    nested = _nested_subscription(obj)
+    if nested is not None and nested is not obj:
+        return _customer_id_from_obj(nested)
+    return None
+
+
+def _stripe_secret_key() -> str | None:
+    key = (os.environ.get("STRIPE_SECRET_KEY") or "").strip()
+    return key or None
+
+
+def _stripe_to_dict(value: Any) -> dict[str, Any] | None:
+    if isinstance(value, dict):
+        return value
+    if value is None:
+        return None
+    to_dict = getattr(value, "to_dict", None)
+    if callable(to_dict):
+        data = to_dict()
+        return data if isinstance(data, dict) else None
+    try:
+        return dict(value)
+    except Exception:
+        return None
+
+
+def retrieve_stripe_subscription(subscription_id: str) -> dict[str, Any] | None:
+    """Fetch a Subscription by id using STRIPE_SECRET_KEY. Returns None on failure."""
+    secret = _stripe_secret_key()
+    if not secret or not subscription_id:
+        return None
+    try:
+        import stripe
+
+        stripe.api_key = secret
+        raw = stripe.Subscription.retrieve(subscription_id)
+        data = _stripe_to_dict(raw)
+        logger.info("Stripe Subscription.retrieve(%s) ok", subscription_id)
+        return data
+    except Exception:
+        logger.exception("Stripe Subscription.retrieve(%s) failed", subscription_id)
+        return None
+
+
+def retrieve_stripe_customer(customer_id: str) -> dict[str, Any] | None:
+    """Fetch a Customer by id using STRIPE_SECRET_KEY. Returns None on failure."""
+    secret = _stripe_secret_key()
+    if not secret or not customer_id:
+        return None
+    try:
+        import stripe
+
+        stripe.api_key = secret
+        raw = stripe.Customer.retrieve(customer_id)
+        data = _stripe_to_dict(raw)
+        logger.info("Stripe Customer.retrieve(%s) ok", customer_id)
+        return data
+    except Exception:
+        logger.exception("Stripe Customer.retrieve(%s) failed", customer_id)
+        return None
+
+
+def retrieve_stripe_invoice(
+    invoice_id: str,
+    *,
+    expand: list[str] | None = None,
+) -> dict[str, Any] | None:
+    """Fetch an Invoice by id (optional expand) using STRIPE_SECRET_KEY."""
+    secret = _stripe_secret_key()
+    if not secret or not invoice_id:
+        return None
+    try:
+        import stripe
+
+        stripe.api_key = secret
+        kwargs: dict[str, Any] = {}
+        if expand:
+            kwargs["expand"] = expand
+        raw = stripe.Invoice.retrieve(invoice_id, **kwargs)
+        data = _stripe_to_dict(raw)
+        logger.info("Stripe Invoice.retrieve(%s) ok expand=%s", invoice_id, expand)
+        return data
+    except Exception:
+        logger.exception("Stripe Invoice.retrieve(%s) failed", invoice_id)
+        return None
+
+
+def _iter_item_dicts(container: Any) -> list[dict[str, Any]]:
+    """Normalize Stripe list / {data: [...]} / bare list containers to dict items."""
+    items: list[Any] = []
+    if isinstance(container, dict):
+        items = list(container.get("data") or [])
+    elif isinstance(container, list):
+        items = container
+    return [i for i in items if isinstance(i, dict)]
+
+
 def period_end_from_stripe_object(obj: dict[str, Any]) -> datetime | None:
-    """Best-effort ``current_period_end`` / line period end from Stripe event objects."""
+    """Best-effort period end from Stripe event objects.
+
+    Sources (in order):
+    - top-level ``current_period_end`` / ``period_end``
+    - subscription ``items.data[].current_period_end`` (newer API: no top-level period)
+    - invoice / checkout line ``period.end``
+    - expanded nested subscription (recursive)
+    """
     for key in ("current_period_end", "period_end"):
         dt = _ts_to_utc(obj.get(key))
         if dt is not None:
             return dt
 
-    # invoice / checkout line items carry period.end
+    # Newer Subscription API: period lives on subscription items, not the root.
     ends: list[datetime] = []
+    for item in _iter_item_dicts(obj.get("items")):
+        dt = _ts_to_utc(item.get("current_period_end"))
+        if dt is not None:
+            ends.append(dt)
+        period = item.get("period")
+        if isinstance(period, dict):
+            dt = _ts_to_utc(period.get("end"))
+            if dt is not None:
+                ends.append(dt)
+
+    # invoice / checkout line items carry period.end
     for container_key in ("lines", "line_items"):
-        container = obj.get(container_key)
-        items: list[Any] = []
-        if isinstance(container, dict):
-            items = list(container.get("data") or [])
-        elif isinstance(container, list):
-            items = container
-        for item in items:
-            if not isinstance(item, dict):
-                continue
+        for item in _iter_item_dicts(obj.get(container_key)):
             period = item.get("period")
             if isinstance(period, dict):
                 dt = _ts_to_utc(period.get("end"))
@@ -415,6 +583,166 @@ def period_end_from_stripe_object(obj: dict[str, Any]) -> datetime | None:
     if nested is not None and nested is not obj:
         return period_end_from_stripe_object(nested)
     return None
+
+
+def resolve_period_end_for_mint(obj: dict[str, Any]) -> datetime | None:
+    """Resolve period end, retrieving the Subscription when only a string id is present."""
+    dt = period_end_from_stripe_object(obj)
+    if dt is not None:
+        return dt
+
+    # Already an expanded nested subscription without period — try retrieve by id.
+    sid = _subscription_id_from_obj(obj)
+    if not sid:
+        return None
+
+    # Avoid redundant retrieve when obj itself is the subscription we already inspected.
+    if obj.get("object") == "subscription" and obj.get("id") == sid:
+        # Still try retrieve in case webhook payload was thin vs API.
+        logger.info(
+            "period_end missing on subscription object %s; retrieving from Stripe API",
+            sid,
+        )
+    elif isinstance(obj.get("subscription"), dict):
+        # Expanded nested sub already walked by period_end_from_stripe_object.
+        logger.info(
+            "period_end missing on expanded subscription %s; retrieving from Stripe API",
+            sid,
+        )
+    else:
+        logger.info(
+            "period_end missing and subscription is id %s; retrieving from Stripe API",
+            sid,
+        )
+
+    retrieved = retrieve_stripe_subscription(sid)
+    if retrieved is None:
+        logger.warning("Cannot resolve period_end: Subscription.retrieve(%s) failed", sid)
+        return None
+    dt = period_end_from_stripe_object(retrieved)
+    if dt is None:
+        logger.warning(
+            "Subscription.retrieve(%s) returned no usable current_period_end",
+            sid,
+        )
+    else:
+        logger.info(
+            "Resolved period_end=%s via Subscription.retrieve(%s)",
+            dt.isoformat(),
+            sid,
+        )
+    return dt
+
+
+def resolve_customer_email(obj: dict[str, Any], email: str | None = None) -> str | None:
+    """Fill missing email via metadata / expanded customer / Customer.retrieve."""
+    if email and "@" in email:
+        return email.strip()
+
+    # Re-check common fields (subscription.created Payment Link payloads are thin).
+    for extractor in (_email_from_checkout_session, _email_from_invoice, _email_from_subscription):
+        got = extractor(obj)
+        if got:
+            return got
+
+    customer = obj.get("customer")
+    if isinstance(customer, dict):
+        got = (customer.get("email") or "").strip()
+        if got and "@" in got:
+            return got
+
+    cid = _customer_id_from_obj(obj)
+    if cid:
+        cust = retrieve_stripe_customer(cid)
+        if cust:
+            got = (cust.get("email") or "").strip()
+            if got and "@" in got:
+                logger.info("Resolved customer email via Customer.retrieve(%s)", cid)
+                return got
+            logger.warning("Customer.retrieve(%s) returned no email", cid)
+        else:
+            logger.warning("Cannot resolve email: Customer.retrieve(%s) failed", cid)
+
+    nested = _nested_subscription(obj)
+    if nested is not None and nested is not obj:
+        return resolve_customer_email(nested, None)
+    return None
+
+
+def ensure_subscription_expanded(obj: dict[str, Any]) -> dict[str, Any]:
+    """When ``subscription`` is a string id, retrieve and attach the dict (copy)."""
+    sub = obj.get("subscription")
+    if isinstance(sub, dict):
+        return obj
+    sid = _subscription_id_from_obj(obj)
+    if not sid:
+        return obj
+    if obj.get("object") == "subscription":
+        return obj
+    retrieved = retrieve_stripe_subscription(sid)
+    if retrieved is None:
+        logger.warning(
+            "Leaving subscription as id %s — retrieve failed (cancel/period may be incomplete)",
+            sid,
+        )
+        return obj
+    logger.info("Expanded subscription id %s via Subscription.retrieve for mint checks", sid)
+    return {**obj, "subscription": retrieved}
+
+
+def enrich_price_ok(obj: dict[str, Any], price_ok: bool) -> bool:
+    """Second-chance Pro price match when webhook lines are thin / new pricing shape."""
+    if price_ok or _matches_pro_price(obj):
+        return True
+    expected = pro_price_id()
+    if not expected:
+        return True
+    # Definitive mismatch if we already saw other price ids.
+    prices = _price_ids_from_obj(obj)
+    if prices:
+        return False
+
+    # Thin invoice: retrieve with expand so pricing.price_details / subscription items appear.
+    if obj.get("object") == "invoice":
+        iid = obj.get("id")
+        if isinstance(iid, str) and iid.startswith("in_"):
+            inv = retrieve_stripe_invoice(
+                iid,
+                expand=[
+                    "lines.data.price",
+                    "lines.data.pricing.price_details.price",
+                    "subscription",
+                    "subscription.items.data.price",
+                ],
+            )
+            if inv and _matches_pro_price(inv):
+                logger.info("Pro price matched via Invoice.retrieve(%s)", iid)
+                return True
+
+    sid = _subscription_id_from_obj(obj)
+    if sid and obj.get("object") != "subscription":
+        sub = obj.get("subscription") if isinstance(obj.get("subscription"), dict) else None
+        if sub is None:
+            sub = retrieve_stripe_subscription(sid)
+        if sub and _matches_pro_price(sub):
+            logger.info("Pro price matched via Subscription.retrieve(%s)", sid)
+            return True
+    return False
+
+
+def _log_ignored_or_error(result: IssuanceResult, event_type: str) -> IssuanceResult:
+    """INFO-log every ignored/error outcome so ops can see remint failures."""
+    if result.status in ("ignored", "error"):
+        logger.info(
+            "Stripe issuance %s: event_id=%s event_type=%s reason=%s email=%s session_id=%s",
+            result.status,
+            result.event_id,
+            event_type or "",
+            result.reason,
+            result.email,
+            result.session_id,
+        )
+    return result
 
 
 def subscription_will_not_renew(obj: dict[str, Any]) -> bool:
@@ -476,25 +804,32 @@ def process_stripe_event(event: dict[str, Any] | Any) -> IssuanceResult:
     event_type = str(event.get("type") or "")
     store = get_issuance_store()
 
+    def _done(result: IssuanceResult) -> IssuanceResult:
+        return _log_ignored_or_error(result, event_type)
+
     if event_id:
         prior = store.get_by_event(event_id)
         if prior is not None:
             logger.info("Stripe event %s already processed (%s) — idempotent replay", event_id, prior.status)
-            return IssuanceResult(
-                status="replay",
-                event_id=event_id,
-                email=prior.email,
-                license_key=prior.license_key,
-                session_id=prior.session_id,
-                reason="already_processed",
-                delivered_via=prior.delivered_via,
+            return _done(
+                IssuanceResult(
+                    status="replay",
+                    event_id=event_id,
+                    email=prior.email,
+                    license_key=prior.license_key,
+                    session_id=prior.session_id,
+                    reason="already_processed",
+                    delivered_via=prior.delivered_via,
+                )
             )
 
     if event_type not in _HANDLED_EVENTS:
-        return IssuanceResult(
-            status="ignored",
-            event_id=event_id or "unknown",
-            reason=f"unhandled_event:{event_type}",
+        return _done(
+            IssuanceResult(
+                status="ignored",
+                event_id=event_id or "unknown",
+                reason=f"unhandled_event:{event_type}",
+            )
         )
 
     data = event.get("data") or {}
@@ -504,13 +839,21 @@ def process_stripe_event(event: dict[str, Any] | Any) -> IssuanceResult:
         if obj is not None and hasattr(obj, "to_dict"):
             obj = obj.to_dict()
         else:
-            return IssuanceResult(
-                status="ignored",
-                event_id=event_id or "unknown",
-                reason="missing_data_object",
+            return _done(
+                IssuanceResult(
+                    status="ignored",
+                    event_id=event_id or "unknown",
+                    reason="missing_data_object",
+                )
             )
 
+    # Payment Link webhooks often send subscription as a string id — expand for
+    # cancel / period / price checks when possible.
+    obj = ensure_subscription_expanded(obj)
+
     email, session_id, price_ok = _extract_mint_context(event_type, obj)
+    price_ok = enrich_price_ok(obj, price_ok)
+    email = resolve_customer_email(obj, email)
 
     if session_id:
         prior_sess = store.get_by_session(session_id)
@@ -527,55 +870,65 @@ def process_stripe_event(event: dict[str, Any] | Any) -> IssuanceResult:
             )
             if event_id:
                 store.put(result)
-            return result
+            return _done(result)
 
     if not price_ok:
-        return IssuanceResult(
-            status="ignored",
-            event_id=event_id or "unknown",
-            email=email,
-            session_id=session_id,
-            reason="price_mismatch_or_unpaid",
+        return _done(
+            IssuanceResult(
+                status="ignored",
+                event_id=event_id or "unknown",
+                email=email,
+                session_id=session_id,
+                reason="price_mismatch_or_unpaid",
+            )
         )
 
     if not email:
-        return IssuanceResult(
-            status="ignored",
-            event_id=event_id or "unknown",
-            session_id=session_id,
-            reason="missing_customer_email",
+        return _done(
+            IssuanceResult(
+                status="ignored",
+                event_id=event_id or "unknown",
+                session_id=session_id,
+                reason="missing_customer_email",
+            )
         )
 
     # No renew after cancel: do not mint/refresh when sub is canceled / won't renew.
     if subscription_will_not_renew(obj):
-        return IssuanceResult(
-            status="ignored",
-            event_id=event_id or "unknown",
-            email=email,
-            session_id=session_id,
-            reason="subscription_canceled_or_non_renewing",
+        return _done(
+            IssuanceResult(
+                status="ignored",
+                event_id=event_id or "unknown",
+                email=email,
+                session_id=session_id,
+                reason="subscription_canceled_or_non_renewing",
+            )
         )
 
-    expires_at = period_end_from_stripe_object(obj)
+    expires_at = resolve_period_end_for_mint(obj)
     if expires_at is None:
-        return IssuanceResult(
-            status="ignored",
-            event_id=event_id or "unknown",
-            email=email,
-            session_id=session_id,
-            reason="missing_period_end",
+        return _done(
+            IssuanceResult(
+                status="ignored",
+                event_id=event_id or "unknown",
+                email=email,
+                session_id=session_id,
+                reason="missing_period_end",
+            )
         )
 
     try:
         license_key = mint_pro_license(email=email, expires_at=expires_at)
     except Exception as e:
         logger.exception("Failed to mint license for %s", email)
-        return IssuanceResult(
-            status="error",
-            event_id=event_id or "unknown",
-            email=email,
-            session_id=session_id,
-            reason=f"mint_failed:{e}",
+        return _done(
+            IssuanceResult(
+                status="error",
+                event_id=event_id or "unknown",
+                email=email,
+                session_id=session_id,
+                reason=f"mint_failed:{e}",
+            )
         )
 
     channel = deliver_license_key(email=email, license_key=license_key)
@@ -589,7 +942,8 @@ def process_stripe_event(event: dict[str, Any] | Any) -> IssuanceResult:
     )
     if event_id:
         store.put(result)
-    return result
+    return _done(result)
+
 
 
 def handle_stripe_webhook(payload: bytes, signature_header: str) -> IssuanceResult:
