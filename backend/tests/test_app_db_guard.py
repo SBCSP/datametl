@@ -12,6 +12,7 @@ os.environ.setdefault(
 os.environ.setdefault("DATABASE_URL", "postgresql+psycopg://test:test@localhost:5432/test")
 os.environ.setdefault("REDIS_URL", "redis://localhost:6379/0")
 
+from app.config import settings
 from app.tenancy.app_db_guard import (
     APP_DB_BLOCK_MESSAGE,
     AppDatabaseBlockedError,
@@ -125,17 +126,24 @@ def test_assert_skips_non_postgres_engines() -> None:
     )
 
 
-def test_assert_uses_settings_database_url_by_default() -> None:
-    # conftest / env sets DATABASE_URL → localhost/test
+def test_assert_uses_settings_database_url_by_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Do not assume CI DATABASE_URL db name; pin settings to a known target.
+    monkeypatch.setattr(
+        settings,
+        "database_url",
+        "postgresql+psycopg://app:secret@127.0.0.1:5432/datametl",
+    )
     with pytest.raises(AppDatabaseBlockedError):
         assert_not_app_metadata_db(
             engine="postgres",
             credentials={
-                "host": "127.0.0.1",
+                "host": "localhost",
                 "port": 5432,
-                "database": "test",
-                "user": "test",
-                "password": "test",
+                "database": "datametl",
+                "user": "app",
+                "password": "secret",
             },
         )
 
