@@ -17,9 +17,10 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app import auth as auth_lib
+from app.config import settings
 from app.db import get_db
 from app.models.tenant_control import Tenant, TenantMembership, User
-from app.tenancy.binding import resolve_user_for_subject
+from app.tenancy.binding import ensure_user_for_subject, resolve_user_for_subject
 from app.tenancy.provision import create_tenant_schema, normalize_tenant_kind
 from app.tenancy.slug import is_valid_slug
 
@@ -48,6 +49,9 @@ def _require_user(
     if subject is None:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Not authenticated.")
     user = resolve_user_for_subject(db, subject)
+    if user is None and settings.auth_legacy_basic and subject == auth_lib.get_username(db):
+        # Legacy token issued before login started creating users rows: provision it now.
+        user = ensure_user_for_subject(db, subject)
     if user is None:
         raise HTTPException(
             status.HTTP_403_FORBIDDEN,

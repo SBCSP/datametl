@@ -10,6 +10,7 @@ from app import auth
 from app.api.schemas_io import AuthStatus, ChangePasswordRequest, LoginRequest, LoginResponse
 from app.config import settings
 from app.db import get_db
+from app.tenancy.binding import ensure_user_for_subject
 from app.tenancy.oauth import (
     GitHubOAuthError,
     GitHubOAuthProvider,
@@ -41,6 +42,8 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)) -> LoginResponse
         )
     if not auth.verify_login(db, payload.username, payload.password):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid username or password.")
+    # Legacy sessions need a public.users row for tenant onboarding/binding, same as OAuth.
+    ensure_user_for_subject(db, payload.username)
     token, exp = auth.issue_token(payload.username)
     return LoginResponse(token=token, username=payload.username, expires_at=exp)
 

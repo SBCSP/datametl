@@ -57,6 +57,28 @@ def resolve_user_for_subject(db: Session, subject: str) -> User | None:
     return None
 
 
+def ensure_user_for_subject(db: Session, subject: str) -> User:
+    """Return the ``public.users`` row for a bearer subject, creating it when missing.
+
+    GitHub OAuth creates users in its callback; the legacy username/password login has no
+    such step, so without this the onboarding gate (``/api/tenants/me``) 403s forever for
+    legacy sessions. The row is keyed by ``display_name`` (no email) so
+    :func:`resolve_user_for_subject` finds it on later requests.
+    """
+    sub = (subject or "").strip()
+    if not sub:
+        raise ValueError("subject is required")
+    existing = resolve_user_for_subject(db, sub)
+    if existing is not None:
+        return existing
+    user = User(email=None, display_name=sub)
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    log.info("created local user for subject %r", sub)
+    return user
+
+
 def _memberships_for_user(db: Session, user_id: uuid.UUID) -> list[TenantMembership]:
     return list(
         db.execute(

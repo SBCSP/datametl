@@ -8,6 +8,8 @@ import { Sidebar } from "@/components/sidebar";
 import { McpBanner } from "@/components/mcp-banner";
 import { OnboardingModal } from "@/components/onboarding-modal";
 import { useActivityNotifications } from "@/lib/use-activity-notifications";
+import { Button } from "@/components/ui/button";
+import { clearToken } from "@/lib/auth";
 
 /** Decides whether to render the sidebar + padded main, or a bare canvas (for printable
  * report routes), and gates the app behind the simple in-app login when AUTH_ENABLED. */
@@ -59,6 +61,38 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     return (
       <div className="flex min-h-dvh items-center justify-center text-sm text-muted-foreground">
         Redirecting to sign in…
+      </div>
+    );
+  }
+
+  // A failed /api/tenants/me must be terminal here. Falling through to the full app would mount
+  // the sidebar WorkspaceChip, whose observer refetches the shared query; TanStack v5 resets a
+  // data-less errored query to `pending`, which flips this gate back to "Loading" and unmounts
+  // the chip again — an infinite fetch loop. Render a dead-end error screen instead.
+  if (checkOnboarding && tenantsMe.isError && tenantsMe.data === undefined) {
+    const detail =
+      tenantsMe.error instanceof Error ? tenantsMe.error.message : String(tenantsMe.error);
+    return (
+      <div className="flex min-h-dvh flex-col items-center justify-center gap-4 px-6 text-center">
+        <div className="space-y-1">
+          <p className="text-sm font-medium">Couldn't load your workspace</p>
+          <p className="max-w-md break-words text-xs text-muted-foreground">{detail}</p>
+        </div>
+        <div className="flex gap-2">
+          <Button size="sm" onClick={() => void tenantsMe.refetch()} disabled={tenantsMe.isFetching}>
+            Retry
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => {
+              clearToken();
+              window.location.href = "/login";
+            }}
+          >
+            Sign out
+          </Button>
+        </div>
       </div>
     );
   }

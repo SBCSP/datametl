@@ -31,6 +31,9 @@ export function WorkspaceChip({ className }: { className?: string }) {
     enabled: canLoadWorkspace,
     staleTime: 15_000,
     retry: false,
+    // Never let this observer kick the shared query back to `pending` on mount — AppShell owns
+    // fetching/erroring for ["tenants-me"]; this chip only reads the result.
+    refetchOnMount: false,
   });
 
   // Hidden on login / onboard modal / unauthenticated / auth-off.

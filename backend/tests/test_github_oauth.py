@@ -319,10 +319,16 @@ def test_legacy_login_still_works_with_oauth_configured(
     from app.main import app
 
     monkeypatch.setattr("app.api.auth.auth.verify_login", lambda db, u, p: u == "admin" and p == "pw")
+    created: list[str] = []
+    monkeypatch.setattr(
+        "app.api.auth.ensure_user_for_subject", lambda db, sub: created.append(sub)
+    )
     client = TestClient(app)
     resp = client.post("/api/auth/login", json={"username": "admin", "password": "pw"})
     assert resp.status_code == 200
     assert resp.json()["username"] == "admin"
+    # Legacy login must provision the public.users row the onboarding gate depends on.
+    assert created == ["admin"]
 
 
 def test_legacy_login_blocked_when_legacy_off(
