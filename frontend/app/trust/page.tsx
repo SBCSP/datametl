@@ -61,13 +61,15 @@ export default function TrustPage() {
         <Card>
           <CardHeader className="pb-3">
             <CardTitle className="text-base flex items-center gap-2">
-              <Bot className="h-4 w-4" /> Mel → Anthropic
+              <Bot className="h-4 w-4" /> Mel → Anthropic or local Ollama
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-2 text-sm text-muted-foreground">
             <p>
               Mel uses <strong className="text-foreground">your</strong> Anthropic API key (also
-              Fernet-encrypted at rest).
+              Fernet-encrypted at rest), or a local Ollama server you configure in Settings. With an{" "}
+              <code className="font-mono text-xs text-foreground">ollama/…</code> model selected,
+              everything below stays on the machine running Ollama and nothing is sent to Anthropic.
             </p>
             <p className="text-foreground font-medium text-xs uppercase tracking-wide pt-1">
               Sent to the model

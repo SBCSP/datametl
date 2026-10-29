@@ -18,7 +18,7 @@ from app.tenancy.names import (
 )
 from app.tenancy.provision import create_tenant_schema, provision_tenant
 from app.tenancy.slug import is_valid_slug, slugify_name
-from app.tenancy.search_path import set_search_path
+from app.tenancy.search_path import bind_session_search_path, set_search_path
 
 __all__ = [
     "SCHEMA_NAME_PREFIX",
@@ -28,6 +28,7 @@ __all__ = [
     "is_valid_slug",
     "is_valid_tenant_schema_name",
     "provision_tenant",
+    "bind_session_search_path",
     "set_search_path",
     "slugify_name",
     "tenant_id_from_schema_name",

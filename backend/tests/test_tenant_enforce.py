@@ -251,14 +251,15 @@ def test_get_db_sets_search_path(monkeypatch: pytest.MonkeyPatch) -> None:
         mock_session.connection.return_value = mock_conn
         with (
             patch("app.db.SessionLocal", return_value=mock_session),
-            patch("app.tenancy.search_path.set_search_path") as sp,
+            patch("app.tenancy.search_path.bind_session_search_path") as sp,
         ):
             from app.db import get_db
 
             gen = get_db()
             db = next(gen)
             assert db is mock_session
-            sp.assert_called_once_with(mock_conn, schema)
+            # Bound per transaction (survives commit), not a one-shot SET on one connection.
+            sp.assert_called_once_with(mock_session, schema)
             with pytest.raises(StopIteration):
                 next(gen)
     finally:
@@ -301,3 +302,51 @@ def test_tenant_header_constant() -> None:
     from app.tenancy.binding import TENANT_HEADER
 
     assert TENANT_HEADER == "X-Tenant-Id"
+
+
+def test_bind_session_search_path_reapplies_on_every_transaction(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression: POST /api/connections 500'd on refresh() after commit().
+
+    A one-shot SET on session.connection() stopped applying once commit() returned the
+    connection to the pool; the next statement ran against public.*. The binding must
+    re-issue SET LOCAL on each new transaction.
+    """
+    from sqlalchemy import create_engine
+    from sqlalchemy import text as real_text
+    from sqlalchemy.orm import Session
+
+    from app.tenancy import search_path as sp_mod
+
+    issued: list[str] = []
+
+    def fake_text(sql: str) -> object:
+        issued.append(sql)
+        return real_text("SELECT 1")  # sqlite can't SET search_path; record and no-op
+
+    monkeypatch.setattr(sp_mod, "text", fake_text)
+    engine = create_engine("sqlite://")
+    schema = tenant_schema_name(uuid.uuid4())
+    with Session(bind=engine) as session:
+        sp_mod.bind_session_search_path(session, schema)
+        assert issued == [f"SET LOCAL search_path TO {schema}, public"]
+
+        session.commit()  # releases the connection → next statement begins a new txn
+        session.execute(real_text("SELECT 1"))
+        assert len(issued) == 2
+
+        session.rollback()
+        session.execute(real_text("SELECT 1"))
+        assert len(issued) == 3
+        assert all(sql.startswith("SET LOCAL search_path") for sql in issued)
+
+
+def test_bind_session_search_path_rejects_unsafe_name() -> None:
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import Session
+
+    from app.tenancy.search_path import bind_session_search_path
+
+    with Session(bind=create_engine("sqlite://")) as session, pytest.raises(ValueError):
+        bind_session_search_path(session, "tenant_../evil")

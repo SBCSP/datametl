@@ -14,7 +14,7 @@ import { Markdown } from "@/components/markdown";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, SelectGroup, SelectLabel } from "@/components/ui/select";
 
 /** Build a friendly, likely-unique name for a saved snippet from its SQL. */
 function scriptName(code: string): string {
@@ -137,7 +137,14 @@ function ChatPageBody() {
     })();
   }, [search, qc, router]);
 
-  const keySet = settings.data?.anthropic_api_key_set ?? true;
+  // Any configured provider lets Mel chat: an Anthropic key, or a local Ollama host.
+  const keySet =
+    settings.data === undefined
+      ? true
+      : settings.data.anthropic_api_key_set || settings.data.ollama_configured;
+  const modelEntries = models.data?.entries ?? [];
+  const anthropicEntries = modelEntries.filter((m) => m.provider === "anthropic");
+  const ollamaEntries = modelEntries.filter((m) => m.provider === "ollama");
 
   async function saveToScripts(code: string) {
     const name = scriptName(code);
@@ -369,11 +376,33 @@ function ChatPageBody() {
               <SelectValue placeholder="Model…" />
             </SelectTrigger>
             <SelectContent>
-              {models.data?.models.map((m) => (
-                <SelectItem key={m} value={m}>
-                  {m}
-                </SelectItem>
-              ))}
+              {anthropicEntries.length > 0 && (
+                <SelectGroup>
+                  <SelectLabel>Anthropic</SelectLabel>
+                  {anthropicEntries.map((m) => (
+                    <SelectItem key={m.id} value={m.id} disabled={!settings.data?.anthropic_api_key_set}>
+                      {m.label}
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
+              )}
+              {ollamaEntries.length > 0 && (
+                <SelectGroup>
+                  <SelectLabel>Ollama (local)</SelectLabel>
+                  {ollamaEntries.map((m) => (
+                    <SelectItem key={m.id} value={m.id}>
+                      {m.label}
+                      {m.supports_tools === false ? " · no tools" : ""}
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
+              )}
+              {modelEntries.length === 0 &&
+                models.data?.models.map((m) => (
+                  <SelectItem key={m} value={m}>
+                    {m}
+                  </SelectItem>
+                ))}
             </SelectContent>
           </Select>
           <Button variant="outline" onClick={newChat}>
@@ -387,7 +416,8 @@ function ChatPageBody() {
           <Card className="max-w-md">
             <CardContent className="space-y-3 py-10 text-center">
               <p className="text-sm text-muted-foreground">
-                No Anthropic API key is configured. Add one to start chatting with Mel.
+                No AI provider is configured. Add an Anthropic API key or a local Ollama URL in
+                Settings to start chatting with Mel.
               </p>
               <Button asChild>
                 <Link href="/settings">Go to Settings</Link>

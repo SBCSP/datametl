@@ -10,7 +10,7 @@ from app.config import settings
 from app.db import SessionLocal
 from app.tenancy.context import get_tenant_context
 from app.tenancy.middleware import TenantContext
-from app.tenancy.search_path import set_search_path
+from app.tenancy.search_path import bind_session_search_path
 
 
 def get_request_tenant(request: Request) -> TenantContext | None:
@@ -34,12 +34,12 @@ def require_tenant_context(request: Request) -> TenantContext | None:
 
 
 def get_tenant_db(request: Request) -> Generator[Session, None, None]:
-    """Session with ``search_path`` set when tenant_context is present on the request."""
+    """Session bound to the tenant ``search_path`` when tenant_context is on the request."""
     db = SessionLocal()
     try:
         ctx = get_request_tenant(request)
         if ctx is not None:
-            set_search_path(db.connection(), ctx.schema_name)
+            bind_session_search_path(db, ctx.schema_name)
         yield db
     finally:
         db.close()

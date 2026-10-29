@@ -1,4 +1,4 @@
-"""Persisted, encrypted app settings (Anthropic API key, Mel prefs, license key).
+"""Persisted, encrypted app settings (Anthropic API key, Ollama URL, Mel prefs, license key).
 
 Values are stored Fernet-encrypted (via the same `vault` used for connection credentials) in
 the `app_settings` table, keyed by a short string. Never returns ciphertext or the raw key from
@@ -113,6 +113,41 @@ def set_license_key(db: Session, token: str | None) -> None:
 
 def clear_license_key(db: Session) -> None:
     row = db.get(AppSetting, _LICENSE_KEY)
+    if row is not None:
+        db.delete(row)
+        db.commit()
+
+
+# --- Ollama base URL (non-secret; Fernet-wrapped so everything lives in one store) ---
+
+_OLLAMA_BASE_URL = "ollama_base_url"
+
+
+def get_ollama_base_url(db: Session) -> str | None:
+    """Operator-set Ollama URL, or None when unset (callers fall back to OLLAMA_BASE_URL env)."""
+    row = db.get(AppSetting, _OLLAMA_BASE_URL)
+    if row is None:
+        return None
+    value = vault.decrypt(row.encrypted_value).get(_OLLAMA_BASE_URL)
+    return (value or "").strip() or None
+
+
+def set_ollama_base_url(db: Session, base_url: str | None) -> None:
+    """Set (upsert) or, when blank/None, clear the stored Ollama URL."""
+    if not base_url or not base_url.strip():
+        clear_ollama_base_url(db)
+        return
+    encrypted = vault.encrypt({_OLLAMA_BASE_URL: base_url.strip().rstrip("/")})
+    row = db.get(AppSetting, _OLLAMA_BASE_URL)
+    if row is None:
+        db.add(AppSetting(key=_OLLAMA_BASE_URL, encrypted_value=encrypted))
+    else:
+        row.encrypted_value = encrypted
+    db.commit()
+
+
+def clear_ollama_base_url(db: Session) -> None:
+    row = db.get(AppSetting, _OLLAMA_BASE_URL)
     if row is not None:
         db.delete(row)
         db.commit()

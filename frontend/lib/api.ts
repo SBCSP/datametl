@@ -57,6 +57,7 @@ import type {
   TapRun,
   TapTestResult,
   TestConnectionResult,
+  OllamaStatus,
 } from "./types";
 
 /** Payload for creating/updating a Schedule (script or tap). */
@@ -321,6 +322,16 @@ export const api = {
     request<{ anthropic_api_key_set: boolean }>("/api/settings/anthropic-key", {
       method: "PUT",
       body: JSON.stringify({ api_key: apiKey }),
+    }),
+  updateOllama: (baseUrl: string) =>
+    request<OllamaStatus>("/api/settings/ollama", {
+      method: "PUT",
+      body: JSON.stringify({ base_url: baseUrl }),
+    }),
+  testOllama: (baseUrl?: string) =>
+    request<OllamaStatus>("/api/settings/ollama/test", {
+      method: "POST",
+      body: JSON.stringify({ base_url: baseUrl ?? null }),
     }),
   updateMelToolApproval: (mode: MelToolApprovalMode) =>
     request<{ mel_tool_approval: MelToolApprovalMode }>("/api/settings/mel-tool-approval", {

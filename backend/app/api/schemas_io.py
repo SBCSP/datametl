@@ -676,6 +676,9 @@ class SettingsResponse(BaseModel):
     auth_token_ttl_hours: int = 0
     # Mel: run_sql_only (default) | always | auto
     mel_tool_approval: str = "run_sql_only"
+    # Local Ollama for Mel: effective URL (Settings override → OLLAMA_BASE_URL env) or None.
+    ollama_base_url: str | None = None
+    ollama_configured: bool = False
     # Licensing (Phase 1 offline Ed25519 keys)
     license: LicenseStatus | None = None
 
@@ -688,6 +691,20 @@ class AnthropicKeyUpdate(BaseModel):
 
 class AnthropicKeyStatus(BaseModel):
     anthropic_api_key_set: bool
+
+
+class OllamaSettingsUpdate(BaseModel):
+    """Set (or clear, when blank) the Ollama base URL Mel should use."""
+
+    base_url: str | None = None
+
+
+class OllamaStatus(BaseModel):
+    ollama_base_url: str | None
+    ollama_configured: bool
+    reachable: bool
+    models: list[str] = Field(default_factory=list)
+    error: str | None = None
 
 
 # --- Chat ---
@@ -703,9 +720,18 @@ class ChatRequest(BaseModel):
     session_id: uuid.UUID | None = None  # links Mel tool audit rows when known
 
 
+class ChatModelInfo(BaseModel):
+    id: str
+    label: str
+    provider: Literal["anthropic", "ollama"]
+    # False → Mel can't use DB tools with it (plain chat only). None → unknown.
+    supports_tools: bool | None = True
+
+
 class ChatModelsResponse(BaseModel):
     models: list[str]
     default: str
+    entries: list[ChatModelInfo] = Field(default_factory=list)
 
 
 class DescribeSqlRequest(BaseModel):
@@ -728,14 +754,14 @@ class MelToolCardIn(BaseModel):
 
 class ChatSessionCreate(BaseModel):
     title: str | None = None  # derived from the first user message when blank
-    model: str
+    model: str = Field(max_length=64)
     messages: list[ChatMessageIn] = Field(default_factory=list)
     tool_cards: list[MelToolCardIn] = Field(default_factory=list)
 
 
 class ChatSessionUpdate(BaseModel):
     title: str | None = None
-    model: str | None = None
+    model: str | None = Field(default=None, max_length=64)
     messages: list[ChatMessageIn]
     # None = leave existing sidecar unchanged (older clients); [] clears.
     tool_cards: list[MelToolCardIn] | None = None

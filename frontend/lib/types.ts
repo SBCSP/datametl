@@ -467,7 +467,18 @@ export interface AppSettings {
   auth_token_ttl_hours: number;
   /** run_sql_only (default) | always | auto — Community forces always */
   mel_tool_approval: "run_sql_only" | "always" | "auto";
+  /** Effective Ollama URL Mel uses (Settings override → OLLAMA_BASE_URL env), or null. */
+  ollama_base_url: string | null;
+  ollama_configured: boolean;
   license: LicenseStatus | null;
+}
+
+export interface OllamaStatus {
+  ollama_base_url: string | null;
+  ollama_configured: boolean;
+  reachable: boolean;
+  models: string[];
+  error: string | null;
 }
 
 export type MelToolApprovalMode = AppSettings["mel_tool_approval"];
@@ -543,9 +554,18 @@ export interface ChatMessage {
   role: "user" | "assistant";
   content: string;
 }
+export type ChatProvider = "anthropic" | "ollama";
+export interface ChatModelEntry {
+  id: string;
+  label: string;
+  provider: ChatProvider;
+  /** false → plain chat only (no Mel DB tools); null → unknown. */
+  supports_tools: boolean | null;
+}
 export interface ChatModels {
   models: string[];
   default: string;
+  entries: ChatModelEntry[];
 }
 export interface ActiveMcp {
   connection_id: string;

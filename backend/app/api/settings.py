@@ -2,7 +2,8 @@
 
 Exposes non-secret config (log level, CORS origins, queue depth, worker tuning) so the UI
 can render an at-a-glance Settings page. Secrets — the actual encryption key, full DB DSN
-with password, Anthropic key, license token — are never returned. URLs are shown with
+with password, Anthropic key, license token — are never returned. The Ollama URL is not a
+secret and is shown so the operator can see which host Mel talks to. URLs are shown with
 credentials redacted.
 """
 from __future__ import annotations
@@ -21,6 +22,8 @@ from app.api.schemas_io import (
     LicenseStatus,
     MelToolApprovalStatus,
     MelToolApprovalUpdate,
+    OllamaSettingsUpdate,
+    OllamaStatus,
     SettingsResponse,
 )
 from app.config import settings as cfg
@@ -29,6 +32,9 @@ from app.jobs.worker import WorkerSettings
 from app.license.entitlements import COMMUNITY_MEL_LIMIT, get_entitlements
 from app.license.gates import require_mel_approval_choice
 from app.license.token import LicenseError, verify_license
+from app.llm.base import ProviderError
+from app.llm.ollama import list_ollama_models, normalize_base_url
+from app.llm.registry import effective_ollama_base_url
 from app.settings_store import (
     clear_license_key,
     get_mel_tool_approval,
@@ -37,6 +43,7 @@ from app.settings_store import (
     set_anthropic_key,
     set_license_key,
     set_mel_tool_approval,
+    set_ollama_base_url,
 )
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
@@ -106,6 +113,8 @@ async def get_settings(db: Session = Depends(get_db)) -> SettingsResponse:
         auth_username=cfg.auth_username,
         auth_token_ttl_hours=cfg.auth_token_ttl_hours,
         mel_tool_approval=ents.effective_mel_tool_approval(stored_approval),
+        ollama_base_url=effective_ollama_base_url(db) or None,
+        ollama_configured=bool(effective_ollama_base_url(db)),
         license=_license_status(db),
     )
 
@@ -117,6 +126,47 @@ def update_anthropic_key(
     """Store (or clear, when blank) the Anthropic API key. Write-only — never returned."""
     set_anthropic_key(db, payload.api_key)
     return AnthropicKeyStatus(anthropic_api_key_set=has_anthropic_key(db))
+
+
+async def _ollama_status(base_url: str) -> OllamaStatus:
+    if not base_url:
+        return OllamaStatus(ollama_base_url=None, ollama_configured=False, reachable=False)
+    try:
+        models = await list_ollama_models(base_url)
+    except ProviderError as e:
+        return OllamaStatus(
+            ollama_base_url=base_url, ollama_configured=True, reachable=False, error=str(e)
+        )
+    return OllamaStatus(
+        ollama_base_url=base_url,
+        ollama_configured=True,
+        reachable=True,
+        models=[m.name for m in models if m.can_chat],
+    )
+
+
+@router.put("/ollama", response_model=OllamaStatus)
+async def update_ollama(payload: OllamaSettingsUpdate, db: Session = Depends(get_db)) -> OllamaStatus:
+    """Store (or clear, when blank) the Ollama URL Mel uses, then probe it for models.
+
+    Saving an unreachable URL is allowed (Ollama may not be running yet); the response says so.
+    """
+    try:
+        url = normalize_base_url(payload.base_url or "")
+    except ProviderError as e:
+        raise HTTPException(400, str(e)) from e
+    set_ollama_base_url(db, url or None)
+    return await _ollama_status(effective_ollama_base_url(db))
+
+
+@router.post("/ollama/test", response_model=OllamaStatus)
+async def test_ollama(payload: OllamaSettingsUpdate, db: Session = Depends(get_db)) -> OllamaStatus:
+    """Probe an Ollama URL (the given one, else the effective one) without saving."""
+    try:
+        url = normalize_base_url(payload.base_url or "") or effective_ollama_base_url(db)
+    except ProviderError as e:
+        raise HTTPException(400, str(e)) from e
+    return await _ollama_status(url)
 
 
 @router.put("/mel-tool-approval", response_model=MelToolApprovalStatus)

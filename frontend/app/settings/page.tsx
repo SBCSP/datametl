@@ -3,8 +3,8 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Bot, CheckCircle2, ExternalLink, KeyRound, Lock, Server, Sparkles, XCircle, ShieldCheck } from "lucide-react";
-import type { MelToolApprovalMode } from "@/lib/types";
+import { Bot, CheckCircle2, Cpu, ExternalLink, KeyRound, Lock, Server, Sparkles, XCircle, ShieldCheck } from "lucide-react";
+import type { MelToolApprovalMode, OllamaStatus } from "@/lib/types";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { api, apiBaseUrl } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
@@ -29,6 +29,31 @@ export default function SettingsPage() {
       setAnthropicKey("");
       qc.invalidateQueries({ queryKey: ["settings"] });
       toast.success(r.anthropic_api_key_set ? "Anthropic key saved" : "Anthropic key cleared");
+    },
+    onError: (e) => toast.error(String(e)),
+  });
+
+  const [ollamaUrl, setOllamaUrl] = useState<string | null>(null);
+  const [ollamaProbe, setOllamaProbe] = useState<OllamaStatus | null>(null);
+  const saveOllama = useMutation({
+    mutationFn: (url: string) => api.updateOllama(url),
+    onSuccess: (r) => {
+      setOllamaUrl(null);
+      setOllamaProbe(r);
+      qc.invalidateQueries({ queryKey: ["settings"] });
+      qc.invalidateQueries({ queryKey: ["chat-models"] });
+      if (!r.ollama_configured) toast.success("Ollama disabled");
+      else if (r.reachable) toast.success(`Ollama saved — ${r.models.length} model(s) found`);
+      else toast.warning(`Ollama saved, but not reachable: ${r.error ?? "unknown error"}`);
+    },
+    onError: (e) => toast.error(String(e)),
+  });
+  const testOllama = useMutation({
+    mutationFn: (url: string) => api.testOllama(url || undefined),
+    onSuccess: (r) => {
+      setOllamaProbe(r);
+      if (r.reachable) toast.success(`Ollama reachable — ${r.models.length} model(s)`);
+      else toast.error(`Ollama not reachable: ${r.error ?? "unknown error"}`);
     },
     onError: (e) => toast.error(String(e)),
   });
@@ -78,7 +103,7 @@ export default function SettingsPage() {
     <div>
       <PageHeader
         title="Settings"
-        description="App-level configuration and diagnostics. Most values are env-driven and read-only; the Anthropic API key is editable below."
+        description="App-level configuration and diagnostics. Most values are env-driven and read-only; Mel's AI providers (Anthropic key, local Ollama) are editable below."
       />
 
       {isLoading || !data ? (
@@ -242,6 +267,109 @@ export default function SettingsPage() {
                 Stored encrypted at rest (Fernet, same as connection credentials) and used by{" "}
                 <a href="/chat" className="underline">Mel</a>, the chat assistant. Write-only — the
                 value is never shown again.
+              </p>
+            </CardContent>
+          </Card>
+
+          {/* Ollama (local models for Mel) */}
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base flex items-center gap-2">
+                <Cpu className="h-4 w-4" /> Ollama (local models)
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3 text-sm">
+              <Row label="Status">
+                {data.ollama_configured ? (
+                  <Badge variant="success">
+                    <CheckCircle2 className="h-3 w-3 mr-1" /> configured
+                  </Badge>
+                ) : (
+                  <Badge variant="secondary">
+                    <XCircle className="h-3 w-3 mr-1" /> off
+                  </Badge>
+                )}
+              </Row>
+              {data.ollama_base_url && (
+                <Row label="URL">
+                  <code className="font-mono text-xs">{data.ollama_base_url}</code>
+                </Row>
+              )}
+              <div className="space-y-1.5">
+                <Label htmlFor="ollama-url">{data.ollama_configured ? "Change URL" : "Ollama URL"}</Label>
+                <Input
+                  id="ollama-url"
+                  placeholder="http://host.docker.internal:11434"
+                  autoComplete="off"
+                  value={ollamaUrl ?? data.ollama_base_url ?? ""}
+                  onChange={(e) => setOllamaUrl(e.target.value)}
+                />
+                <p className="text-xs text-muted-foreground">
+                  From inside docker, Ollama on this machine is{" "}
+                  <code className="font-mono">http://host.docker.internal:11434</code>.
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  size="sm"
+                  onClick={() => saveOllama.mutate((ollamaUrl ?? data.ollama_base_url ?? "").trim())}
+                  disabled={
+                    saveOllama.isPending ||
+                    !(ollamaUrl ?? data.ollama_base_url ?? "").trim() ||
+                    (ollamaUrl ?? "") === (data.ollama_base_url ?? "")
+                  }
+                >
+                  Save
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => testOllama.mutate((ollamaUrl ?? data.ollama_base_url ?? "").trim())}
+                  disabled={testOllama.isPending || !(ollamaUrl ?? data.ollama_base_url ?? "").trim()}
+                >
+                  {testOllama.isPending ? "Testing…" : "Test"}
+                </Button>
+                {data.ollama_configured && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => saveOllama.mutate("")}
+                    disabled={saveOllama.isPending}
+                  >
+                    Disable
+                  </Button>
+                )}
+              </div>
+              {ollamaProbe && ollamaProbe.ollama_configured && (
+                <div className="rounded-md border p-2 text-xs">
+                  {ollamaProbe.reachable ? (
+                    ollamaProbe.models.length > 0 ? (
+                      <>
+                        <p className="mb-1 text-muted-foreground">Models available to Mel:</p>
+                        <div className="flex flex-wrap gap-1">
+                          {ollamaProbe.models.map((m) => (
+                            <Badge key={m} variant="secondary" className="font-mono">
+                              {m}
+                            </Badge>
+                          ))}
+                        </div>
+                      </>
+                    ) : (
+                      <p className="text-muted-foreground">
+                        Reachable, but no models installed. Run{" "}
+                        <code className="font-mono">ollama pull qwen3</code> (tool calling needs a
+                        tool-capable model).
+                      </p>
+                    )
+                  ) : (
+                    <p className="text-destructive">{ollamaProbe.error ?? "Not reachable."}</p>
+                  )}
+                </div>
+              )}
+              <p className="text-xs text-muted-foreground pt-2 border-t">
+                Models appear in Mel's model picker as <code className="font-mono">ollama/&lt;tag&gt;</code>.
+                Prompts and tool results stay on the machine running Ollama — nothing is sent to
+                Anthropic for those models. Env default: <code className="font-mono">OLLAMA_BASE_URL</code>.
               </p>
             </CardContent>
           </Card>

@@ -36,6 +36,12 @@ class Settings(BaseSettings):
     github_oauth_client_secret: str = Field("", alias="GITHUB_OAUTH_CLIENT_SECRET")
     github_oauth_redirect_uri: str = Field("", alias="GITHUB_OAUTH_REDIRECT_URI")
 
+    # Local Ollama for Mel (optional). The URL set in Settings overrides this env default.
+    # Docker Desktop: http://host.docker.internal:11434 reaches Ollama running on the host.
+    ollama_base_url: str = Field("", alias="OLLAMA_BASE_URL")
+    ollama_timeout_seconds: int = Field(300, alias="OLLAMA_TIMEOUT_SECONDS")
+    ollama_num_ctx: int = Field(16384, alias="OLLAMA_NUM_CTX")
+
     # Prometheus scrape endpoint at /metrics (outside /api, so not gated by AUTH_ENABLED).
     # Set METRICS_TOKEN to require `Authorization: Bearer <token>` from the scraper.
     metrics_enabled: bool = Field(True, alias="METRICS_ENABLED")

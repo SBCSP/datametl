@@ -36,6 +36,9 @@ services:
       context: ../backend
       dockerfile: Dockerfile
     restart: unless-stopped
+    # Lets OLLAMA_BASE_URL=http://host.docker.internal:11434 work on Linux too.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       app-postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
@@ -53,6 +56,10 @@ services:
       METRICS_TOKEN: ${METRICS_TOKEN:-}
       DATAMETL_LICENSE_DEV_BYPASS: ${DATAMETL_LICENSE_DEV_BYPASS:-false}
       LICENSE_PUBLIC_KEY: ${LICENSE_PUBLIC_KEY:-}
+      # Local Ollama for Mel (optional). Overridable from the Settings page.
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-}
+      OLLAMA_TIMEOUT_SECONDS: ${OLLAMA_TIMEOUT_SECONDS:-300}
+      OLLAMA_NUM_CTX: ${OLLAMA_NUM_CTX:-16384}
       # Vendor issuer only (Phase 2). Empty = webhook disabled; Community installs need none of these.
       STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
       STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
@@ -75,6 +82,9 @@ services:
       context: ../backend
       dockerfile: Dockerfile
     restart: unless-stopped
+    # Lets OLLAMA_BASE_URL=http://host.docker.internal:11434 work on Linux too.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       app-postgres: { condition: service_healthy }
       redis: { condition: service_healthy }

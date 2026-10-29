@@ -15,7 +15,7 @@ from app.tenancy.context import reset_tenant_context, set_tenant_context
 from app.tenancy.cutover import DEFAULT_CUTOVER_TENANT_ID
 from app.tenancy.middleware import TenantContext
 from app.tenancy.names import tenant_schema_name
-from app.tenancy.search_path import set_search_path
+from app.tenancy.search_path import bind_session_search_path
 
 log = logging.getLogger("datametl.tenancy.job_bind")
 
@@ -50,7 +50,7 @@ def open_tenant_session(tenant_id: str | None = None) -> Generator[Session, None
     try:
         if settings.tenant_enforce_enabled:
             tid, schema = resolve_job_schema(db, tenant_id)
-            set_search_path(db.connection(), schema)
+            bind_session_search_path(db, schema)
             token = set_tenant_context(
                 TenantContext(tenant_id=tid, schema_name=schema, role=None)
             )
